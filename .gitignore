@@ -5,6 +5,8 @@ node_modules/
 .next-dev/
 dist/
 coverage/
+*.tsbuildinfo
+apps/web/build.log
 .env
 .env.local
 .env.development.local
