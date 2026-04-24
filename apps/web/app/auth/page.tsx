@@ -47,6 +47,7 @@ const authFeedbackByError: Record<string, string> = {
   "password-too-short": "Password must be at least 8 characters.",
   "registration-failed": "Could not create account. Please try again.",
   "sign-in-required": "Sign in first to continue.",
+  "verification-send-failed": "We could not send the verification email. Please try again.",
 };
 
 function resolveAuthMode(rawMode?: string): AuthMode {
@@ -96,7 +97,7 @@ export default async function AuthPage({ searchParams }: AuthPageProps) {
   const redirectTo = resolvedSearchParams?.redirectTo;
   const currentUser = await getCurrentSessionUser();
   const checkoutPackageId = getCheckoutPackageId(redirectTo);
-  const checkoutPackage = checkoutPackageId ? getCreatorPackageByCheckoutId(checkoutPackageId) : null;
+  const checkoutPackage = checkoutPackageId ? await getCreatorPackageByCheckoutId(checkoutPackageId) : null;
   const feedbackMessage =
     (resolvedSearchParams?.error ? authFeedbackByError[resolvedSearchParams.error] : undefined) ??
     (resolvedSearchParams?.verificationStatus ? authFeedbackByStatus[resolvedSearchParams.verificationStatus] : undefined) ??

@@ -9,6 +9,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.redirect(new URL("/auth?mode=register-creator", request.url), 303);
   }
 
-  deleteCreatorRecordForAuthUser(currentUser.id);
+  await deleteCreatorRecordForAuthUser(currentUser.id);
   return NextResponse.redirect(new URL("/creator/profile?status=deleted", request.url), 303);
 }

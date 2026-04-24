@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.redirect(redirectUrl, 303);
   }
 
-  const result = resetPasswordWithToken(token, password);
+  const result = await resetPasswordWithToken(token, password);
 
   if (!result.ok) {
     const redirectUrl = new URL("/auth/reset-password", request.url);

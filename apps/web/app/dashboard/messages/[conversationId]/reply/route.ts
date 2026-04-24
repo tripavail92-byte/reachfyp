@@ -22,7 +22,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ co
 
   const formData = await request.formData();
   const content = String(formData.get("content") ?? "").trim();
-  const result = postMessageToConversation({
+  const result = await postMessageToConversation({
     conversationId,
     senderId: currentUser.id,
     content,

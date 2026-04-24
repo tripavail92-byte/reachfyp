@@ -33,7 +33,7 @@ export default async function AdminHiresPage({ searchParams }: AdminHiresPagePro
     redirect("/creators");
   }
 
-  const hires = listAllInstantHires();
+  const hires = await listAllInstantHires();
   const actionableHires = hires.filter(
     (hire) => hire.escrowStatus === "held-local" && hire.status !== "approved" && hire.status !== "cancelled",
   );

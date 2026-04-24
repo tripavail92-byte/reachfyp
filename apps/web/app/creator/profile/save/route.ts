@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.redirect(getRedirectUrl(request, { error: "invalid-price" }), 303);
   }
 
-  const result = upsertCreatorRecordForAuthUser({
+  const result = await upsertCreatorRecordForAuthUser({
     authUserId: currentUser.id,
     username,
     name,

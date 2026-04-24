@@ -38,6 +38,15 @@ Implementation rules:
 - OAuth providers currently wired: Apple and Google
 - Payments, hosted auth, hosted database, and background job infrastructure remain future integrations, not active platform dependencies in this repo today
 
+## Approved Milestone 5 Production Decisions
+
+- Transactional auth email for password reset and verification will use Postmark in staging and production.
+- Production persistence will move from local SQLite to managed Postgres while keeping the same app-owned tables and the `packages/api` boundary.
+- Session auth will stay database-backed with hashed session tokens; Phase 1 will not migrate to JWTs.
+- Production cookies will harden to a host-only secure session cookie with `HttpOnly`, `Secure`, `SameSite=Lax`, and `Path=/`.
+- Session rotation remains server-owned and should occur on sign-in, provider callback sign-in, and password reset completion.
+- Background job infrastructure is still deferred; Phase 1 production can send transactional auth email directly from the server layer through a mailer adapter.
+
 Enterprise rule:
 - Critical business actions are server-owned.
 - Browsers must never write trust-critical or financial state directly.

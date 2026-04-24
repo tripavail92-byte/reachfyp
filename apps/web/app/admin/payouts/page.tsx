@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { listAllPayoutRequests } from "@reachfyp/api";
+import { listAllPayoutRequests, listAuthUsersByRole } from "@reachfyp/api";
 import { GlassPanel } from "@reachfyp/ui";
 import { redirect } from "next/navigation";
 import { getCurrentSessionUser } from "../../../lib/auth/session";
@@ -33,7 +33,8 @@ export default async function AdminPayoutsPage({ searchParams }: AdminPayoutsPag
     redirect("/creators");
   }
 
-  const payoutRequests = listAllPayoutRequests();
+  const payoutRequests = await listAllPayoutRequests();
+  const creatorNameById = new Map((await listAuthUsersByRole("creator")).map((creatorUser) => [creatorUser.id, creatorUser.name]));
   const pendingRequests = payoutRequests.filter((request) => request.status === "pending");
   const reviewedRequests = payoutRequests.filter((request) => request.status !== "pending");
   const pendingAmount = pendingRequests.reduce((total, request) => total + request.amount, 0);
@@ -96,7 +97,7 @@ export default async function AdminPayoutsPage({ searchParams }: AdminPayoutsPag
               {pendingRequests.length > 0 ? pendingRequests.map((request) => (
                 <div key={request.id} className="profile-list-card">
                   <h3 className="panel-card-title">${request.amount.toFixed(2)} · {request.status}</h3>
-                  <p className="profile-list-card__copy">Creator: {request.creatorUserId}</p>
+                  <p className="profile-list-card__copy">Creator: {creatorNameById.get(request.creatorUserId) ?? request.creatorUserId}</p>
                   <p className="profile-list-card__copy">{request.note}</p>
                   <div className="auth-layout" aria-label="Payout review actions">
                     <form action={`/admin/payouts/${request.id}/review`} className="auth-form" method="post">
@@ -141,7 +142,7 @@ export default async function AdminPayoutsPage({ searchParams }: AdminPayoutsPag
               {reviewedRequests.length > 0 ? reviewedRequests.map((request) => (
                 <div key={request.id} className="profile-list-card">
                   <h3 className="panel-card-title">${request.amount.toFixed(2)} · {request.status}</h3>
-                  <p className="profile-list-card__copy">Creator: {request.creatorUserId}</p>
+                  <p className="profile-list-card__copy">Creator: {creatorNameById.get(request.creatorUserId) ?? request.creatorUserId}</p>
                   <p className="profile-list-card__copy">{request.note}</p>
                   {request.adminNote ? <p className="profile-list-card__copy">Admin note: {request.adminNote}</p> : null}
                 </div>

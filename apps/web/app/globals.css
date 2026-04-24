@@ -1644,7 +1644,12 @@ button {
   font-size: 0.9rem;
   font-weight: 700;
   color: var(--app-text-soft);
+  border: 1px solid var(--border-strong);
   border-radius: 9px;
+  background: var(--surface-panel);
+  cursor: pointer;
+  font-family: inherit;
+  appearance: none;
   transition: background 140ms ease, color 140ms ease;
 }
 
@@ -1652,6 +1657,11 @@ button {
   background: var(--surface-elevated);
   color: var(--app-text);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+.auth-tab:hover {
+  background: var(--surface-elevated);
+  color: var(--app-text);
 }
 
 .auth-submit {
@@ -2565,6 +2575,13 @@ body[data-theme="dark"] .join-signup-card__provider--google {
   .product-grid--two,
   .auth-layout {
     display: grid;
+  }
+
+  .profile-hero,
+  .product-grid--three,
+  .product-grid--two,
+  .auth-layout {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .creator-card__media {

@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.redirect(getRedirectUrl(request, { error: "invalid-social-url" }), 303);
   }
 
-  const result = upsertCreatorSocialAccountForAuthUser({
+  const result = await upsertCreatorSocialAccountForAuthUser({
     authUserId: currentUser.id,
     platform,
     handle,

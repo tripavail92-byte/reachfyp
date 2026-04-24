@@ -27,7 +27,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ hi
   const reason = String(formData.get("reason") ?? "").trim();
 
   if (action === "request-revision") {
-    const result = requestRevisionForDeliverable({
+    const result = await requestRevisionForDeliverable({
       hireId,
       deliverableId,
       brandUserId: currentUser.id,
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ hi
   }
 
   if (action === "approve") {
-    const result = approveDeliverableForHire({
+    const result = await approveDeliverableForHire({
       hireId,
       deliverableId,
       brandUserId: currentUser.id,
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ hi
   }
 
   if (action === "refund") {
-    const result = refundInstantHire({
+    const result = await refundInstantHire({
       hireId,
       brandUserId: currentUser.id,
       reason,

@@ -30,7 +30,7 @@ export default async function InstantHireCheckoutPage({ params, searchParams }: 
     redirect(`/auth?mode=brand-checkout-register&redirectTo=${encodeURIComponent(`/dashboard/instant-hire/${packageId}`)}`);
   }
 
-  const packageSelection = getCreatorPackageByCheckoutId(packageId);
+  const packageSelection = await getCreatorPackageByCheckoutId(packageId);
 
   if (!packageSelection) {
     notFound();
@@ -38,7 +38,7 @@ export default async function InstantHireCheckoutPage({ params, searchParams }: 
 
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const errorMessage = resolvedSearchParams?.error ? instantHireErrorMessages[resolvedSearchParams.error] : undefined;
-  const brandWallet = currentUser.role === "brand" ? getWalletAccountByUserId(currentUser.id) : undefined;
+  const brandWallet = currentUser.role === "brand" ? await getWalletAccountByUserId(currentUser.id) : undefined;
 
   return (
     <main className="app-shell">

@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
 
   const formData = await request.formData();
   const title = String(formData.get("title") ?? "").trim();
-  const result = deleteCreatorPackageForAuthUser(currentUser.id, title);
+  const result = await deleteCreatorPackageForAuthUser(currentUser.id, title);
 
   if (!result.ok) {
     return NextResponse.redirect(getRedirectUrl(request, { error: result.error }), 303);

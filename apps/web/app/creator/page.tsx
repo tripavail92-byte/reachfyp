@@ -63,8 +63,8 @@ type CreatorJoinPageProps = {
 export default async function CreatorJoinPage({ searchParams }: CreatorJoinPageProps) {
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const deviceContext = await getSignupDeviceContext();
-  const featuredCreators = listCreatorRecords().slice(0, 4);
-  const usernameAvailability = getCreatorUsernameAvailability(String(resolvedSearchParams?.username ?? ""));
+  const featuredCreators = (await listCreatorRecords()).slice(0, 4);
+  const usernameAvailability = await getCreatorUsernameAvailability(String(resolvedSearchParams?.username ?? ""));
   const chosenUsername = usernameAvailability.username || "your-name";
   const claimHref = `/creator?username=${encodeURIComponent(chosenUsername)}&signup=1`;
   const canClaimUsername = usernameAvailability.status === "available" || usernameAvailability.status === "claimable";

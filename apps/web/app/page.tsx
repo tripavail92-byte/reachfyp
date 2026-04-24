@@ -49,8 +49,8 @@ const marketplaceSignals = [
 
 const featuredThemes = ["rose", "pearl", "sunset", "berry"] as const;
 
-export default function HomePage() {
-  const featuredCreators = listCreatorRecords().slice(0, 4);
+export default async function HomePage() {
+  const featuredCreators = (await listCreatorRecords()).slice(0, 4);
 
   return (
     <main className="home-page">

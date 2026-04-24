@@ -11,19 +11,19 @@ type CreatorProfilePageProps = {
   }>;
 };
 
-export function generateStaticParams() {
-  return listCreatorRecordUsernames().map((username) => ({ username }));
+export async function generateStaticParams() {
+  return (await listCreatorRecordUsernames()).map((username) => ({ username }));
 }
 
 export default async function CreatorProfilePage({ params }: CreatorProfilePageProps) {
   const { username } = await params;
-  const creator = getCreatorRecordByUsername(username);
+  const creator = await getCreatorRecordByUsername(username);
 
   if (!creator) {
     notFound();
   }
 
-  const relatedCreators = listRelatedCreatorRecords(creator.username, 2);
+  const relatedCreators = await listRelatedCreatorRecords(creator.username, 2);
 
   return (
     <main className="app-shell">

@@ -39,13 +39,13 @@ export default async function CreatorHireDetailPage({ params, searchParams }: Cr
     redirect("/creators");
   }
 
-  const creatorProfile = getCreatorRecordByAuthUserId(currentUser.id);
+  const creatorProfile = await getCreatorRecordByAuthUserId(currentUser.id);
 
   if (!creatorProfile) {
     redirect("/creator/profile");
   }
 
-  const hireDetail = getInstantHireDetailById(hireId);
+  const hireDetail = await getInstantHireDetailById(hireId);
 
   if (!hireDetail) {
     notFound();

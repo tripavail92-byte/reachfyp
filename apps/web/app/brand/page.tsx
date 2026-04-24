@@ -147,7 +147,7 @@ type BrandPageProps = {
 export default async function BrandPage({ searchParams }: BrandPageProps) {
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const deviceContext = await getSignupDeviceContext();
-  const featuredCreators = listCreatorRecords().slice(0, 4);
+  const featuredCreators = (await listCreatorRecords()).slice(0, 4);
   const showSignupModal = resolvedSearchParams?.signup === "1";
   const feedbackMessage = resolvedSearchParams?.error ? brandSignupErrorMessages[resolvedSearchParams.error] : undefined;
   const googleSignupHref = `/auth/google/start?flow=brand&redirectTo=${encodeURIComponent("/creators")}`;

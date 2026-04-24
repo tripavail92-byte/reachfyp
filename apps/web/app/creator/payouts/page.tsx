@@ -33,8 +33,8 @@ export default async function CreatorPayoutsPage({ searchParams }: CreatorPayout
     redirect("/creators");
   }
 
-  const wallet = getWalletAccountByUserId(currentUser.id);
-  const payoutRequests = listPayoutRequestsForCreator(currentUser.id);
+  const wallet = await getWalletAccountByUserId(currentUser.id);
+  const payoutRequests = await listPayoutRequestsForCreator(currentUser.id);
   const pendingAmount = payoutRequests.filter((request) => request.status === "pending").reduce((total, request) => total + request.amount, 0);
   const availableToRequest = Math.max((wallet?.balance ?? 0) - pendingAmount, 0);
   const pendingRequests = payoutRequests.filter((request) => request.status === "pending");

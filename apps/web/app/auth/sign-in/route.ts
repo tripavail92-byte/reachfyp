@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
   const password = String(formData.get("password") ?? "");
   const redirectTo = getSafeRedirectPath(String(formData.get("redirectTo") ?? ""));
   const mode = getSafeMode(String(formData.get("mode") ?? ""));
-  const authenticatedUser = authenticateAuthUser(email, password);
+  const authenticatedUser = await authenticateAuthUser(email, password);
 
   if (!authenticatedUser) {
     const failureParams: Record<string, string> = { error: "invalid-credentials", mode: mode ?? "sign-in" };
@@ -55,5 +55,5 @@ export async function POST(request: NextRequest) {
   }
 
   const response = NextResponse.redirect(new URL(redirectTo ?? "/auth?status=signed-in", request.url), 303);
-  return attachSessionCookie(response, authenticatedUser.id);
+  return await attachSessionCookie(response, authenticatedUser.id);
 }

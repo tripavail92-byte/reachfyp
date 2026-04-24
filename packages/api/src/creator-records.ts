@@ -81,7 +81,7 @@ export type CreatorUsernameAvailability = {
   creator?: CreatorRecord;
 };
 
-function getCreatorRecords() {
+async function getCreatorRecords() {
   return listStoredCreatorRecords(creatorSeedRecords);
 }
 
@@ -161,23 +161,23 @@ function sortMarketplaceItems(items: CreatorMarketplaceItem[], sort: CreatorMark
   });
 }
 
-export function listCreatorRecords() {
+export async function listCreatorRecords() {
   return getCreatorRecords();
 }
 
-export function listCreatorRecordUsernames() {
-  return getCreatorRecords().map((creator) => creator.username);
+export async function listCreatorRecordUsernames() {
+  return (await getCreatorRecords()).map((creator) => creator.username);
 }
 
-export function getCreatorRecordTotal() {
-  return getCreatorRecords().length;
+export async function getCreatorRecordTotal() {
+  return (await getCreatorRecords()).length;
 }
 
-export function getCreatorRecordByUsername(username: string) {
-  return getCreatorRecords().find((creator) => creator.username === username);
+export async function getCreatorRecordByUsername(username: string) {
+  return (await getCreatorRecords()).find((creator) => creator.username === username);
 }
 
-export function getCreatorUsernameAvailability(rawUsername: string): CreatorUsernameAvailability {
+export async function getCreatorUsernameAvailability(rawUsername: string): Promise<CreatorUsernameAvailability> {
   const raw = rawUsername.trim().toLowerCase();
   const username = normalizeCreatorUsername(rawUsername);
 
@@ -199,8 +199,8 @@ export function getCreatorUsernameAvailability(rawUsername: string): CreatorUser
     };
   }
 
-  const creator = getCreatorRecordByUsername(username);
-  const reservedCreatorUsernames = new Set(listReservedCreatorUsernames());
+  const creator = await getCreatorRecordByUsername(username);
+  const reservedCreatorUsernames = new Set(await listReservedCreatorUsernames());
 
   if (!creator) {
     if (reservedCreatorUsernames.has(username)) {
@@ -243,7 +243,7 @@ export function getCreatorPackageCheckoutId(username: string, packageTitle: stri
   return `${username}--${slugifyPackageTitle(packageTitle)}`;
 }
 
-export function getCreatorPackageByCheckoutId(packageId: string): CreatorPackageSelection | undefined {
+export async function getCreatorPackageByCheckoutId(packageId: string): Promise<CreatorPackageSelection | undefined> {
   const separatorIndex = packageId.indexOf("--");
 
   if (separatorIndex < 1) {
@@ -252,7 +252,7 @@ export function getCreatorPackageByCheckoutId(packageId: string): CreatorPackage
 
   const username = packageId.slice(0, separatorIndex);
   const packageSlug = packageId.slice(separatorIndex + 2);
-  const creator = getCreatorRecordByUsername(username);
+  const creator = await getCreatorRecordByUsername(username);
 
   if (!creator) {
     return undefined;
@@ -271,45 +271,45 @@ export function getCreatorPackageByCheckoutId(packageId: string): CreatorPackage
   };
 }
 
-export function getCreatorRecordByAuthUserId(authUserId: string) {
+export async function getCreatorRecordByAuthUserId(authUserId: string) {
   return getStoredCreatorRecordByAuthUserId(creatorSeedRecords, authUserId);
 }
 
-export function upsertCreatorRecordForAuthUser(input: import("./creator-database").CreatorProfileUpsertInput) {
+export async function upsertCreatorRecordForAuthUser(input: import("./creator-database").CreatorProfileUpsertInput) {
   return upsertStoredCreatorRecordForAuthUser(creatorSeedRecords, input);
 }
 
-export function deleteCreatorRecordForAuthUser(authUserId: string) {
+export async function deleteCreatorRecordForAuthUser(authUserId: string) {
   return deleteStoredCreatorRecordForAuthUser(creatorSeedRecords, authUserId);
 }
 
-export function upsertCreatorPackageForAuthUser(input: import("./creator-database").CreatorPackageUpsertInput) {
+export async function upsertCreatorPackageForAuthUser(input: import("./creator-database").CreatorPackageUpsertInput) {
   return upsertStoredCreatorPackageForAuthUser(creatorSeedRecords, input);
 }
 
-export function deleteCreatorPackageForAuthUser(authUserId: string, packageTitle: string) {
+export async function deleteCreatorPackageForAuthUser(authUserId: string, packageTitle: string) {
   return deleteStoredCreatorPackageForAuthUser(creatorSeedRecords, authUserId, packageTitle);
 }
 
-export function upsertCreatorSocialAccountForAuthUser(input: import("./creator-database").CreatorSocialAccountUpsertInput) {
+export async function upsertCreatorSocialAccountForAuthUser(input: import("./creator-database").CreatorSocialAccountUpsertInput) {
   return upsertStoredCreatorSocialAccountForAuthUser(creatorSeedRecords, input);
 }
 
-export function deleteCreatorSocialAccountForAuthUser(authUserId: string, platform: string) {
+export async function deleteCreatorSocialAccountForAuthUser(authUserId: string, platform: string) {
   return deleteStoredCreatorSocialAccountForAuthUser(creatorSeedRecords, authUserId, platform);
 }
 
-export function syncCreatorSocialAccountForAuthUser(authUserId: string, platform: string) {
+export async function syncCreatorSocialAccountForAuthUser(authUserId: string, platform: string) {
   return syncStoredCreatorSocialAccountForAuthUser(creatorSeedRecords, authUserId, platform);
 }
 
-export function listRelatedCreatorRecords(username: string, limit = 2) {
-  return getCreatorRecords()
+export async function listRelatedCreatorRecords(username: string, limit = 2) {
+  return (await getCreatorRecords())
     .filter((creator) => creator.username !== username)
     .slice(0, limit);
 }
 
-export function getCreatorMarketplaceResponse(query: CreatorMarketplaceQuery): CreatorMarketplaceResponse {
+export async function getCreatorMarketplaceResponse(query: CreatorMarketplaceQuery): Promise<CreatorMarketplaceResponse> {
   if (query.previewState === "empty") {
     return {
       items: [],
@@ -323,7 +323,7 @@ export function getCreatorMarketplaceResponse(query: CreatorMarketplaceQuery): C
     };
   }
 
-  const filteredCreators = getCreatorRecords().filter((creator) => query.filters.every((filter) => matchesMarketplaceFilter(creator, filter)));
+  const filteredCreators = (await getCreatorRecords()).filter((creator) => query.filters.every((filter) => matchesMarketplaceFilter(creator, filter)));
   const allItems = sortMarketplaceItems(filteredCreators.map(toMarketplaceItem), query.sort);
   const startIndex = (query.page - 1) * query.pageSize;
   const endIndex = startIndex + query.pageSize;

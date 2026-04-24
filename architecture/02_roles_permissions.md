@@ -161,3 +161,6 @@ Admin role is never self-assigned. It is granted directly in the database by a s
 - Password reset issues a single-use reset token and invalidates active sessions after a successful password change
 - Creator signup reserves a username before profile completion via `reserved_creator_username`
 - Protected routes and handlers check both authentication state and role boundaries
+- Approved production persistence target is managed Postgres under the same application-owned tables and route-handler permissions
+- Approved production email delivery target is Postmark for password reset and verification mail
+- Approved production session strategy keeps hashed server-stored sessions instead of JWTs and hardens the production cookie to a host-only secure cookie with server-owned rotation

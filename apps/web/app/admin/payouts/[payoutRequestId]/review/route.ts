@@ -23,7 +23,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pa
   const formData = await request.formData();
   const action = String(formData.get("action") ?? "").trim();
   const adminNote = String(formData.get("adminNote") ?? "").trim();
-  const result = reviewPayoutRequest({
+  const result = await reviewPayoutRequest({
     payoutRequestId,
     adminNote,
     action: action === "approve" ? "approve" : "reject",

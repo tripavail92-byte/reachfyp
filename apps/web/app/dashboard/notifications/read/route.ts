@@ -13,10 +13,10 @@ export async function POST(request: NextRequest) {
   const notificationId = String(formData.get("notificationId") ?? "").trim();
 
   if (notificationId) {
-    markNotificationRead(notificationId, currentUser.id);
+    await markNotificationRead(notificationId, currentUser.id);
     return NextResponse.redirect(new URL("/dashboard/notifications?status=read", request.url), 303);
   }
 
-  markAllNotificationsRead(currentUser.id);
+  await markAllNotificationsRead(currentUser.id);
   return NextResponse.redirect(new URL("/dashboard/notifications?status=read-all", request.url), 303);
 }

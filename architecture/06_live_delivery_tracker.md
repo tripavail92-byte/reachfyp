@@ -35,7 +35,7 @@ For every feature change, update this file before closing the work:
 - Date: 2026-04-24
 - Phase: Phase 1 core launch, web-first execution
 - Current milestone: Launch-readiness hardening, with discovery, onboarding, and core hire operations now built and validated locally
-- Current focus: finish the remaining browser QA honestly, then harden auth for launch-readiness before widening operations depth
+- Current focus: implement the locked production email and persistence choices, then finish live provider verification for Milestone 5
 
 ## Milestone Board
 
@@ -66,18 +66,22 @@ Completed this week:
 - [x] completed functional public-route QA across homepage, creators discovery, creator profile CTA routing, campaigns, and auth entry
 - [x] tightened homepage responsive nav stacking and revalidated production build output
 - [x] added local password reset and email verification flows with single-use hashed tokens, session invalidation on password reset, and non-production preview links for local validation
+- [x] completed the protected-route visual QA pass across creator workspace, instant-hire checkout, brand hire queue and detail, creator hires, creator payouts, notifications, admin hires, and admin payouts
+- [x] fixed two UI defects found during the protected-route QA pass: creator profile nav highlighting and admin payout creator labels
+- [x] completed the remaining public-route and theme QA pass across homepage, creators, public creator profile, pricing, campaigns, and auth in both light and dark themes
+- [x] fixed two additional UI defects found during the public/theme QA pass: mobile single-column overflow on public/profile/pricing/campaign layouts and dark-theme auth secondary button contrast
+- [x] locked the Milestone 5 production decisions for auth email delivery and deployment-grade persistence/session strategy
 
 In progress this week:
-- [ ] finish the remaining visual QA passes for creator workspace, hire, payout, notification, and admin routes
-- [ ] lock the production delivery and deployment choices for auth emails and persistence
+- [ ] complete the runtime Postgres cutover after staging the shared schema, env surface, and bootstrap SQL under the existing app-owned boundary
 
 Blocked or external this week:
 - [ ] live Google and Apple end-to-end verification depends on real provider credentials and callback configuration for the target environment
 - [ ] physical-device confirmation for Apple visibility rules depends on real devices or equivalent emulation
 
 Next queued work after the current slice:
-- [ ] production-ready persistence and deployment session considerations
-- [ ] production email delivery path for password reset and verification links
+- [ ] complete managed Postgres runtime persistence after the new shared schema bootstrap and env wiring stage
+- [ ] validate Postmark delivery against real staging or production credentials
 - [ ] dispute and payout workflow depth beyond the current shell
 
 ## Goals
@@ -183,23 +187,22 @@ Next queued work after the current slice:
 
 ## In Progress
 
-- [ ] visually QA the expanded creator workspace, hire, notification, payout, and admin surfaces in the running browser
-- [ ] define the production delivery and persistence follow-up for the new auth recovery flows
+- [ ] complete the runtime Postgres follow-up after staging the auth mailer and shared schema bootstrap work
 
 ## Remaining Work
 
 ### Browser QA still needed
 
-- [ ] visually QA creators, creator profile, pricing, campaigns, and auth in the running browser and tune spacing or contrast where needed
 - [ ] verify Android vs iOS provider presentation behavior on physical devices before closing the mobile-specific signup presentation work
 
 ### Phase 1 core launch work still ahead
 
 - [ ] live-test Google and Apple signup end to end with real provider credentials and callback configuration
-- [ ] auth hardening beyond the current local session foundation: production email delivery, deployment-ready persistence, and any stricter verified-email policy decisions
+- [x] implement the approved Postmark auth email delivery path for password reset and email verification
+- [ ] complete the runtime migration from SQLite to managed Postgres after staging the shared schema bootstrap, env surface, and exported Postgres SQL
+- [ ] decide whether creator and brand protected routes should require verified email before sensitive operations beyond the current recovery prompts
 - [ ] dispute-oriented admin tooling beyond force release/refund
 - [ ] richer payout settlement detail beyond request and review state
-- [ ] broader browser-first visual polish across the onboarding and hire operations routes
 
 ### Deferred or intentionally not active yet
 
@@ -283,6 +286,14 @@ Next queued work after the current slice:
 - [x] 2026-04-24: `pnpm --filter @reachfyp/web build` passed after tightening homepage responsive nav stacking and browser screenshots confirmed the join CTAs now lead the narrow header layout more cleanly
 - [x] 2026-04-24: `pnpm --filter @reachfyp/web build` passed after adding `/auth/forgot-password`, `/auth/reset-password`, `/auth/verify-email`, hashed one-time auth token storage, and password-reset session invalidation
 - [x] 2026-04-24: browser QA validated email/password signup verification prompts, successful email verification consumption, generic forgot-password responses for existing and nonexistent emails, successful password reset, and rejection of reused reset tokens
+- [x] 2026-04-24: browser QA on `http://127.0.0.1:3000` validated creator profile layout plus brand role boundary, brand instant-hire checkout, brand hire queue and detail, message thread, creator hire queue and approved-hire detail, creator payouts, creator notifications, admin hire moderation, and admin payout review; this pass also surfaced and fixed the creator-profile nav active state and admin payout creator-name labels
+- [x] 2026-04-24: `pnpm --filter @reachfyp/web build` passed after the protected-route visual QA fixes for creator profile nav highlighting and admin payout creator labels
+- [x] 2026-04-24: browser QA on `http://127.0.0.1:3000` validated homepage, creators, public creator profile, pricing, campaigns, and auth in both light and dark themes; this pass surfaced and fixed shared mobile overflow on public/profile/pricing/campaign layouts and dark-theme auth secondary button contrast
+- [x] 2026-04-24: browser QA confirmed the homepage featured-card hover zoom still animates correctly and the creators page renders visual filter, sort, load-more, empty, and error states as intended in the live browser
+- [x] 2026-04-24: creator workspace QA validated profile-save feedback, package-save feedback, social connect, social sync, and social disconnect states; checkout QA created `hire_84cd9e54-d404-4d92-a836-816af49e958a` and `conv_41974486-31e7-494f-b15a-5e5e49656afc`, then verified the resulting hire detail and message thread success states
+- [x] 2026-04-24: `pnpm --filter @reachfyp/web build` passed after the final public/theme QA fixes for mobile overflow and dark auth button contrast
+- [x] 2026-04-24: password reset and email verification routes now send through a shared mailer adapter, using Postmark when configured and falling back to development preview links only when live delivery is not wired
+- [x] 2026-04-24: the shared SQLite schema was centralized into canonical bootstrap statements, `.env.example` now includes `DATABASE_PROVIDER`, `DATABASE_URL`, and `SQLITE_DATABASE_PATH`, and the API package exports the staged Postgres bootstrap SQL while preserving the current SQLite runtime and database-backed session model
 - [x] 2026-04-23: `cmd /c "cd /d D:\marketingsales && netstat -ano | findstr :3000"` confirmed localhost dev service was listening on port 3000 during route verification
 - [x] 2026-04-23: `cmd /c "cd /d D:\marketingsales\apps\web && pnpm dev"` restarted cleanly after clearing stale Next outputs and served `/` successfully from the isolated dev cache
 - [x] 2026-04-24: `http://localhost:3000/` served successfully from the restarted frontend dev server after the theming fixes
@@ -338,32 +349,33 @@ Next queued work after the current slice:
 ### Manual checks still needed
 
 - [x] open `/` and confirm homepage copy and CTA still match current milestone
-- [ ] open `/` and verify the larger portrait cards, badge placement, and hover zoom feel right visually
-- [ ] open `/creators` and verify filter toggles, sort changes, loading state, empty state, error recovery, load-more behavior, and portrait hover behavior visually
-- [ ] open `/creators/[username]` and verify hero imagery, score cards, and related creators visually in-browser
-- [ ] open `/pricing`, `/campaigns`, and `/auth` and tune copy or spacing after visual review if needed
+- [x] open `/` and verify the larger portrait cards, badge placement, and hover zoom feel right visually
+- [x] open `/creators` and verify filter toggles, sort changes, loading state, empty state, error recovery, load-more behavior, and portrait hover behavior visually
+- [x] open `/creators/[username]` and verify hero imagery, score cards, and related creators visually in-browser
+- [x] open `/pricing`, `/campaigns`, and `/auth` and tune copy or spacing after visual review if needed
 - [x] manually verify `/creator` username lookup states, signup modal open/close behavior, provider-first layout, and recovery from signup errors in-browser
 - [x] manually verify `/brand` same-page signup modal behavior, provider-first layout, and recovery from signup errors in-browser
 - [ ] manually verify live Apple and Google signup once provider credentials are configured for the environment
 - [x] manually verify Android hides Apple and iPhone shows both Apple and Google on the onboarding surfaces via server-rendered user-agent checks
 - [x] manually verify email verification and password reset flows, including single-use token rejection and generic forgot-password responses, in-browser
-- [ ] toggle light and dark themes across the live routes and verify contrast, surfaces, and interactive states visually
+- [x] toggle light and dark themes across the live routes and verify contrast, surfaces, and interactive states visually
 - [ ] manually verify the new signed-in nav state and auth feedback banners across `/auth`, `/creator`, `/brand`, `/pricing`, `/campaigns`, and `/creators`
-- [ ] manually verify `/creator/profile` form spacing, feedback states, and role-boundary messaging in-browser
-- [ ] manually verify package editing and social connect/sync/disconnect states inside `/creator/profile` in-browser
-- [ ] manually verify `/dashboard/instant-hire/[package_id]` checkout spacing, role boundaries, and success state in-browser
-- [ ] manually verify `/dashboard/hires/[hire_id]` and `/dashboard/messages/[conversation_id]` spacing, content hierarchy, and role boundaries in-browser
-- [ ] manually verify `/creator/hires` and `/creator/hires/[hire_id]` spacing, revision feedback visibility, and submission states in-browser
-- [ ] manually verify `/dashboard/hires`, `/dashboard/notifications`, `/creator/payouts`, `/admin/hires`, and `/admin/payouts` spacing, hierarchy, and moderation/payout form ergonomics in-browser
+- [x] manually verify `/creator/profile` form spacing, feedback states, and role-boundary messaging in-browser
+- [x] manually verify package editing and social connect/sync/disconnect states inside `/creator/profile` in-browser
+- [x] manually verify `/dashboard/instant-hire/[package_id]` checkout spacing, role boundaries, and success state in-browser
+- [x] manually verify `/dashboard/hires/[hire_id]` and `/dashboard/messages/[conversation_id]` spacing, content hierarchy, and role boundaries in-browser
+- [x] manually verify `/creator/hires` and `/creator/hires/[hire_id]` spacing, revision feedback visibility, and submission states in-browser
+- [x] manually verify `/dashboard/hires`, `/dashboard/notifications`, `/creator/payouts`, `/admin/hires`, and `/admin/payouts` spacing, hierarchy, and moderation/payout form ergonomics in-browser
 
 ## Risks and Watchouts
 
 - the current creator database is a local SQLite store bootstrapped from seed data; production-grade hosted persistence and multi-user operational hardening still remain future work
-- the current auth system now includes local password reset and email verification flows, but production hardening still needs outbound email delivery, deployment-grade persistence/session decisions, and any stricter verified-email gating rules
+- the current auth system now includes local password reset and email verification flows, and the production target is now explicit: Postmark for reset/verification delivery plus managed Postgres with database-backed sessions; implementation still remains ahead
 - instant hire now writes local hire detail, deliverables, conversation, notifications, payout requests, and admin operations end-to-end, but deeper dispute tooling and settlement breadth still remain
 - seeded marketplace creators still begin with synthetic local participant IDs until claimed, but claiming the matching seed username now rebinds prior hires, conversations, deliverables, and wallet ownership into the real creator account
 - root Turbo validation is reliable when run through `cmd /c` in this Windows workspace
 - reused PowerShell shells can show misleading `Terminate batch job` prompts during parallel command execution
+- local QA on `127.0.0.1` can trigger localhost-normalized redirects from Next route handlers during form submits, so alternate-origin browser testing may need manual retargeting even though the production host decision remains single-origin
 
 ## Next Update Trigger
 

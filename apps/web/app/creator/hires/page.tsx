@@ -16,9 +16,9 @@ export default async function CreatorHiresPage() {
     redirect("/creators");
   }
 
-  const creatorProfile = getCreatorRecordByAuthUserId(currentUser.id);
-  const hires = listInstantHiresForCreator(currentUser.id);
-  const notifications = listNotificationsForUser(currentUser.id);
+  const creatorProfile = await getCreatorRecordByAuthUserId(currentUser.id);
+  const hires = await listInstantHiresForCreator(currentUser.id);
+  const notifications = await listNotificationsForUser(currentUser.id);
   const queueGroups = [
     {
       title: "Needs delivery",

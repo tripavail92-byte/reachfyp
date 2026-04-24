@@ -34,7 +34,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ hi
   const notes = String(formData.get("notes") ?? "").trim();
   const fileUrls = normalizeFileUrls(String(formData.get("fileUrls") ?? ""));
 
-  const result = submitDeliverableForHire({
+  const result = await submitDeliverableForHire({
     hireId,
     creatorUserId: currentUser.id,
     title,

@@ -27,11 +27,11 @@ export async function getCurrentSessionUser() {
     return null;
   }
 
-  return getAuthUserBySessionToken(sessionToken);
+  return await getAuthUserBySessionToken(sessionToken);
 }
 
-export function attachSessionCookie(response: NextResponse, userId: string) {
-  const sessionToken = createAuthSession(userId);
+export async function attachSessionCookie(response: NextResponse, userId: string) {
+  const sessionToken = await createAuthSession(userId);
   response.cookies.set(SESSION_COOKIE_NAME, sessionToken, getSessionCookieOptions());
   return response;
 }
@@ -49,6 +49,6 @@ export async function destroyCurrentSession() {
   const sessionToken = await getCurrentSessionToken();
 
   if (sessionToken) {
-    deleteAuthSession(sessionToken);
+    await deleteAuthSession(sessionToken);
   }
 }

@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.redirect(getRedirectUrl(request, { error: "invalid-package-price" }), 303);
   }
 
-  const result = upsertCreatorPackageForAuthUser({
+  const result = await upsertCreatorPackageForAuthUser({
     authUserId: currentUser.id,
     originalTitle,
     title,

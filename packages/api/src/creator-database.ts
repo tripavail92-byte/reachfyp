@@ -1,7 +1,4 @@
-import { mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { fileURLToPath } from "node:url";
+import { getReachfypDatabaseClient, listTableColumns, tableExists, type ReachfypDatabase } from "./database-client";
 import type { CreatorPackage, CreatorRecord, CreatorSocialAccount } from "./creator-records";
 
 export type CreatorProfileUpsertInput = {
@@ -61,8 +58,6 @@ type CreatorRow = {
   reviews_json: string;
 };
 
-const packageDirectory = dirname(fileURLToPath(import.meta.url));
-const creatorDatabasePath = join(packageDirectory, "..", "data", "creator-records.sqlite");
 const creatorColumnDefinitions = [
   { name: "auth_user_id", definition: "TEXT" },
   { name: "social_accounts_json", definition: "TEXT" },
@@ -76,63 +71,28 @@ const defaultCreatorMetrics = {
   rating: 4.8,
 } as const;
 
-let database: DatabaseSync | null = null;
+let database: ReachfypDatabase | null = null;
 
-function ensureCreatorColumns(db: DatabaseSync) {
-  const columns = db.prepare("PRAGMA table_info(creators)").all() as Array<{ name: string }>;
+async function ensureCreatorColumns(db: ReachfypDatabase) {
+  const columns = await listTableColumns(db, "creators");
   const existingColumnNames = new Set(columns.map((column) => column.name));
 
-  creatorColumnDefinitions.forEach((column) => {
+  for (const column of creatorColumnDefinitions) {
     if (!existingColumnNames.has(column.name)) {
-      db.exec(`ALTER TABLE creators ADD COLUMN ${column.name} ${column.definition}`);
+      await db.exec(`ALTER TABLE creators ADD COLUMN ${column.name} ${column.definition}`);
     }
-  });
+  }
 
-  db.prepare("UPDATE creators SET social_accounts_json = '[]' WHERE social_accounts_json IS NULL").run();
+  await db.prepare("UPDATE creators SET social_accounts_json = '[]' WHERE social_accounts_json IS NULL").run();
 }
 
-function tableExists(db: DatabaseSync, tableName: string) {
-  const row = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1").get(tableName) as { name: string } | undefined;
-  return Boolean(row);
-}
-
-export function getReachfypDatabase() {
+export async function getReachfypDatabase() {
   if (database) {
     return database;
   }
 
-  mkdirSync(dirname(creatorDatabasePath), { recursive: true });
-
-  database = new DatabaseSync(creatorDatabasePath);
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS creators (
-      id TEXT PRIMARY KEY,
-      username TEXT NOT NULL UNIQUE,
-      auth_user_id TEXT,
-      name TEXT NOT NULL,
-      image_url TEXT NOT NULL,
-      image_alt TEXT NOT NULL,
-      location TEXT NOT NULL,
-      niche_json TEXT NOT NULL,
-      badges_json TEXT NOT NULL,
-      authenticity INTEGER NOT NULL,
-      performance INTEGER NOT NULL,
-      audience_quality INTEGER NOT NULL,
-      growth_signal TEXT NOT NULL,
-      delivery_quality TEXT NOT NULL,
-      rating REAL NOT NULL,
-      price TEXT NOT NULL,
-      summary TEXT NOT NULL,
-      package_note TEXT NOT NULL,
-      hero_note TEXT NOT NULL,
-      packages_json TEXT NOT NULL,
-      social_accounts_json TEXT NOT NULL,
-      portfolio_json TEXT NOT NULL,
-      reviews_json TEXT NOT NULL
-    )
-  `);
-
-  ensureCreatorColumns(database);
+  database = await getReachfypDatabaseClient();
+  await ensureCreatorColumns(database);
 
   return database;
 }
@@ -201,7 +161,7 @@ function fromCreatorRow(row: CreatorRow): CreatorRecord {
   };
 }
 
-function getUpdateCreatorStatement(db: DatabaseSync) {
+function getUpdateCreatorStatement(db: ReachfypDatabase) {
   return db.prepare(`
     UPDATE creators
     SET id = :id,
@@ -231,7 +191,7 @@ function getUpdateCreatorStatement(db: DatabaseSync) {
   `);
 }
 
-function getInsertCreatorStatement(db: DatabaseSync) {
+function getInsertCreatorStatement(db: ReachfypDatabase) {
   return db.prepare(`
     INSERT INTO creators (
       id,
@@ -285,7 +245,7 @@ function getInsertCreatorStatement(db: DatabaseSync) {
   `);
 }
 
-function getUpdateCreatorByUsernameStatement(db: DatabaseSync) {
+function getUpdateCreatorByUsernameStatement(db: ReachfypDatabase) {
   return db.prepare(`
     UPDATE creators
     SET id = :id,
@@ -315,8 +275,8 @@ function getUpdateCreatorByUsernameStatement(db: DatabaseSync) {
   `);
 }
 
-function saveCreatorRecordForAuthUser(
-  db: DatabaseSync,
+async function saveCreatorRecordForAuthUser(
+  db: ReachfypDatabase,
   creatorRecord: CreatorRecord,
   authUserId: string,
   shouldInsert: boolean,
@@ -325,79 +285,79 @@ function saveCreatorRecordForAuthUser(
   const row = toCreatorRow(creatorRecord, authUserId);
 
   if (shouldInsert) {
-    getInsertCreatorStatement(db).run(row);
+    await getInsertCreatorStatement(db).run(row);
     return;
   }
 
   if (matchUsername) {
-    getUpdateCreatorByUsernameStatement(db).run({
+    await getUpdateCreatorByUsernameStatement(db).run({
       ...row,
       match_username: matchUsername,
     });
     return;
   }
 
-  getUpdateCreatorStatement(db).run(row);
+  await getUpdateCreatorStatement(db).run(row);
 }
 
-function rebindClaimedCreatorOperationalState(db: DatabaseSync, creatorUsername: string, authUserId: string) {
+async function rebindClaimedCreatorOperationalState(db: ReachfypDatabase, creatorUsername: string, authUserId: string) {
   const syntheticParticipantId = `creator:${creatorUsername}`;
 
-  if (tableExists(db, "wallet_accounts")) {
-    const authWallet = db.prepare("SELECT * FROM wallet_accounts WHERE user_id = ? LIMIT 1").get(authUserId) as { id: string; balance: number; held_balance: number } | undefined;
-    const syntheticWallet = db.prepare("SELECT * FROM wallet_accounts WHERE user_id = ? LIMIT 1").get(syntheticParticipantId) as { id: string; balance: number; held_balance: number } | undefined;
+  if (await tableExists(db, "wallet_accounts")) {
+    const authWallet = await db.prepare("SELECT * FROM wallet_accounts WHERE user_id = ? LIMIT 1").get<{ id: string; balance: number; held_balance: number }>([authUserId]);
+    const syntheticWallet = await db.prepare("SELECT * FROM wallet_accounts WHERE user_id = ? LIMIT 1").get<{ id: string; balance: number; held_balance: number }>([syntheticParticipantId]);
 
     if (authWallet && syntheticWallet && authWallet.id !== syntheticWallet.id) {
-      db.prepare(
+      await db.prepare(
         `UPDATE wallet_accounts
          SET balance = ?, held_balance = ?, updated_at = ?
          WHERE id = ?`
-      ).run(authWallet.balance + syntheticWallet.balance, authWallet.held_balance + syntheticWallet.held_balance, new Date().toISOString(), authWallet.id);
+      ).run([authWallet.balance + syntheticWallet.balance, authWallet.held_balance + syntheticWallet.held_balance, new Date().toISOString(), authWallet.id]);
 
-      db.prepare("UPDATE wallet_transactions SET wallet_id = ? WHERE wallet_id = ?").run(authWallet.id, syntheticWallet.id);
-      db.prepare("UPDATE instant_hires SET creator_wallet_id = ? WHERE creator_wallet_id = ?").run(authWallet.id, syntheticWallet.id);
-      db.prepare("DELETE FROM wallet_accounts WHERE id = ?").run(syntheticWallet.id);
+      await db.prepare("UPDATE wallet_transactions SET wallet_id = ? WHERE wallet_id = ?").run([authWallet.id, syntheticWallet.id]);
+      await db.prepare("UPDATE instant_hires SET creator_wallet_id = ? WHERE creator_wallet_id = ?").run([authWallet.id, syntheticWallet.id]);
+      await db.prepare("DELETE FROM wallet_accounts WHERE id = ?").run([syntheticWallet.id]);
     } else if (syntheticWallet && !authWallet) {
-      db.prepare("UPDATE wallet_accounts SET user_id = ?, updated_at = ? WHERE id = ?").run(authUserId, new Date().toISOString(), syntheticWallet.id);
+      await db.prepare("UPDATE wallet_accounts SET user_id = ?, updated_at = ? WHERE id = ?").run([authUserId, new Date().toISOString(), syntheticWallet.id]);
     }
   }
 
-  if (tableExists(db, "instant_hires")) {
-    db.prepare(
+  if (await tableExists(db, "instant_hires")) {
+    await db.prepare(
       `UPDATE instant_hires
        SET creator_participant_id = ?,
            creator_auth_user_id = ?
        WHERE creator_username = ?
          AND (creator_participant_id = ? OR creator_auth_user_id IS NULL)`
-    ).run(authUserId, authUserId, creatorUsername, syntheticParticipantId);
+    ).run([authUserId, authUserId, creatorUsername, syntheticParticipantId]);
   }
 
-  if (tableExists(db, "conversations")) {
-    const conversationRows = db
+  if (await tableExists(db, "conversations")) {
+    const conversationRows = await db
       .prepare("SELECT id, participant_ids_json FROM conversations WHERE participant_ids_json LIKE ?")
-      .all(`%${syntheticParticipantId}%`) as Array<{ id: string; participant_ids_json: string }>;
+      .all<{ id: string; participant_ids_json: string }>([`%${syntheticParticipantId}%`]);
 
-    conversationRows.forEach((conversation) => {
+    for (const conversation of conversationRows) {
       const nextParticipantIds = (JSON.parse(conversation.participant_ids_json) as string[]).map((participantId) => participantId === syntheticParticipantId ? authUserId : participantId);
 
-      db.prepare("UPDATE conversations SET participant_ids_json = ? WHERE id = ?").run(JSON.stringify([...new Set(nextParticipantIds)]), conversation.id);
-    });
+      await db.prepare("UPDATE conversations SET participant_ids_json = ? WHERE id = ?").run([JSON.stringify([...new Set(nextParticipantIds)]), conversation.id]);
+    }
   }
 
-  if (tableExists(db, "messages")) {
-    db.prepare("UPDATE messages SET sender_id = ? WHERE sender_id = ?").run(authUserId, syntheticParticipantId);
+  if (await tableExists(db, "messages")) {
+    await db.prepare("UPDATE messages SET sender_id = ? WHERE sender_id = ?").run([authUserId, syntheticParticipantId]);
   }
 
-  if (tableExists(db, "deliverables")) {
-    db.prepare("UPDATE deliverables SET creator_user_id = ? WHERE creator_user_id = ?").run(authUserId, syntheticParticipantId);
+  if (await tableExists(db, "deliverables")) {
+    await db.prepare("UPDATE deliverables SET creator_user_id = ? WHERE creator_user_id = ?").run([authUserId, syntheticParticipantId]);
   }
 }
 
-function seedCreatorDatabase(seedRecords: CreatorRecord[]) {
-  const db = getReachfypDatabase();
-  const existingCount = db.prepare("SELECT COUNT(*) as count FROM creators").get() as { count: number };
+async function seedCreatorDatabase(seedRecords: CreatorRecord[]) {
+  const db = await getReachfypDatabase();
+  const existingCount = await db.prepare("SELECT COUNT(*) as count FROM creators").get<{ count: number }>();
 
-  if (existingCount.count > 0) {
+  if ((existingCount?.count ?? 0) > 0) {
     return;
   }
 
@@ -453,39 +413,33 @@ function seedCreatorDatabase(seedRecords: CreatorRecord[]) {
     )
   `);
 
-  db.exec("BEGIN");
-
-  try {
-    seedRecords.forEach((record) => {
-      insertStatement.run(toCreatorRow(record));
-    });
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  await db.transaction(async () => {
+    for (const record of seedRecords) {
+      await insertStatement.run(toCreatorRow(record));
+    }
+  });
 }
 
-export function listStoredCreatorRecords(seedRecords: CreatorRecord[]) {
-  seedCreatorDatabase(seedRecords);
+export async function listStoredCreatorRecords(seedRecords: CreatorRecord[]) {
+  await seedCreatorDatabase(seedRecords);
 
-  const rows = getReachfypDatabase().prepare("SELECT * FROM creators ORDER BY username ASC").all() as CreatorRow[];
+  const rows = await (await getReachfypDatabase()).prepare("SELECT * FROM creators ORDER BY username ASC").all<CreatorRow>();
   return rows.map(fromCreatorRow);
 }
 
-export function getStoredCreatorRecordByAuthUserId(seedRecords: CreatorRecord[], authUserId: string) {
-  seedCreatorDatabase(seedRecords);
+export async function getStoredCreatorRecordByAuthUserId(seedRecords: CreatorRecord[], authUserId: string) {
+  await seedCreatorDatabase(seedRecords);
 
-  const row = getReachfypDatabase().prepare("SELECT * FROM creators WHERE auth_user_id = ? LIMIT 1").get(authUserId) as CreatorRow | undefined;
+  const row = await (await getReachfypDatabase()).prepare("SELECT * FROM creators WHERE auth_user_id = ? LIMIT 1").get<CreatorRow>([authUserId]);
   return row ? fromCreatorRow(row) : undefined;
 }
 
-export function upsertStoredCreatorRecordForAuthUser(seedRecords: CreatorRecord[], input: CreatorProfileUpsertInput) {
-  seedCreatorDatabase(seedRecords);
+export async function upsertStoredCreatorRecordForAuthUser(seedRecords: CreatorRecord[], input: CreatorProfileUpsertInput) {
+  await seedCreatorDatabase(seedRecords);
 
-  const db = getReachfypDatabase();
-  const existingByAuthUser = db.prepare("SELECT * FROM creators WHERE auth_user_id = ? LIMIT 1").get(input.authUserId) as CreatorRow | undefined;
-  const existingByUsername = db.prepare("SELECT * FROM creators WHERE username = ? LIMIT 1").get(input.username) as CreatorRow | undefined;
+  const db = await getReachfypDatabase();
+  const existingByAuthUser = await db.prepare("SELECT * FROM creators WHERE auth_user_id = ? LIMIT 1").get<CreatorRow>([input.authUserId]);
+  const existingByUsername = await db.prepare("SELECT * FROM creators WHERE username = ? LIMIT 1").get<CreatorRow>([input.username]);
   const claimableSeedProfile = !existingByAuthUser && existingByUsername && !existingByUsername.auth_user_id;
 
   if (existingByUsername && existingByUsername.auth_user_id !== input.authUserId && !claimableSeedProfile) {
@@ -536,11 +490,9 @@ export function upsertStoredCreatorRecordForAuthUser(seedRecords: CreatorRecord[
     heroNote: input.heroNote,
   };
 
-  db.exec("BEGIN");
-
-  try {
-    saveCreatorRecordForAuthUser(
-      db,
+  await db.transaction(async (transactionDatabase) => {
+    await saveCreatorRecordForAuthUser(
+      transactionDatabase,
       creatorRecord,
       input.authUserId,
       !existingByAuthUser && !claimableSeedProfile,
@@ -548,14 +500,9 @@ export function upsertStoredCreatorRecordForAuthUser(seedRecords: CreatorRecord[
     );
 
     if (claimableSeedProfile) {
-      rebindClaimedCreatorOperationalState(db, existingByUsername.username, input.authUserId);
+      await rebindClaimedCreatorOperationalState(transactionDatabase, existingByUsername.username, input.authUserId);
     }
-
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  });
 
   return {
     ok: true as const,
@@ -565,11 +512,11 @@ export function upsertStoredCreatorRecordForAuthUser(seedRecords: CreatorRecord[
   };
 }
 
-export function upsertStoredCreatorPackageForAuthUser(seedRecords: CreatorRecord[], input: CreatorPackageUpsertInput) {
-  seedCreatorDatabase(seedRecords);
+export async function upsertStoredCreatorPackageForAuthUser(seedRecords: CreatorRecord[], input: CreatorPackageUpsertInput) {
+  await seedCreatorDatabase(seedRecords);
 
-  const db = getReachfypDatabase();
-  const existingByAuthUser = db.prepare("SELECT * FROM creators WHERE auth_user_id = ? LIMIT 1").get(input.authUserId) as CreatorRow | undefined;
+  const db = await getReachfypDatabase();
+  const existingByAuthUser = await db.prepare("SELECT * FROM creators WHERE auth_user_id = ? LIMIT 1").get<CreatorRow>([input.authUserId]);
 
   if (!existingByAuthUser) {
     return { ok: false as const, error: "profile-not-found" as const };
@@ -599,15 +546,15 @@ export function upsertStoredCreatorPackageForAuthUser(seedRecords: CreatorRecord
     packages: nextPackages,
   };
 
-  saveCreatorRecordForAuthUser(db, nextCreator, input.authUserId, false);
+  await saveCreatorRecordForAuthUser(db, nextCreator, input.authUserId, false);
   return { ok: true as const, created: !input.originalTitle, creator: nextCreator };
 }
 
-export function deleteStoredCreatorPackageForAuthUser(seedRecords: CreatorRecord[], authUserId: string, packageTitle: string) {
-  seedCreatorDatabase(seedRecords);
+export async function deleteStoredCreatorPackageForAuthUser(seedRecords: CreatorRecord[], authUserId: string, packageTitle: string) {
+  await seedCreatorDatabase(seedRecords);
 
-  const db = getReachfypDatabase();
-  const existingByAuthUser = db.prepare("SELECT * FROM creators WHERE auth_user_id = ? LIMIT 1").get(authUserId) as CreatorRow | undefined;
+  const db = await getReachfypDatabase();
+  const existingByAuthUser = await db.prepare("SELECT * FROM creators WHERE auth_user_id = ? LIMIT 1").get<CreatorRow>([authUserId]);
 
   if (!existingByAuthUser) {
     return { ok: false as const, error: "profile-not-found" as const };
@@ -626,15 +573,15 @@ export function deleteStoredCreatorPackageForAuthUser(seedRecords: CreatorRecord
     packages: nextPackages,
   };
 
-  saveCreatorRecordForAuthUser(db, nextCreator, authUserId, false);
+  await saveCreatorRecordForAuthUser(db, nextCreator, authUserId, false);
   return { ok: true as const, creator: nextCreator };
 }
 
-export function upsertStoredCreatorSocialAccountForAuthUser(seedRecords: CreatorRecord[], input: CreatorSocialAccountUpsertInput) {
-  seedCreatorDatabase(seedRecords);
+export async function upsertStoredCreatorSocialAccountForAuthUser(seedRecords: CreatorRecord[], input: CreatorSocialAccountUpsertInput) {
+  await seedCreatorDatabase(seedRecords);
 
-  const db = getReachfypDatabase();
-  const existingByAuthUser = db.prepare("SELECT * FROM creators WHERE auth_user_id = ? LIMIT 1").get(input.authUserId) as CreatorRow | undefined;
+  const db = await getReachfypDatabase();
+  const existingByAuthUser = await db.prepare("SELECT * FROM creators WHERE auth_user_id = ? LIMIT 1").get<CreatorRow>([input.authUserId]);
 
   if (!existingByAuthUser) {
     return { ok: false as const, error: "profile-not-found" as const };
@@ -656,15 +603,15 @@ export function upsertStoredCreatorSocialAccountForAuthUser(seedRecords: Creator
     socialAccounts: creator.socialAccounts.filter((account) => account.platform !== input.platform).concat(nextAccount),
   };
 
-  saveCreatorRecordForAuthUser(db, nextCreator, input.authUserId, false);
+  await saveCreatorRecordForAuthUser(db, nextCreator, input.authUserId, false);
   return { ok: true as const, created: !existingAccount, creator: nextCreator };
 }
 
-export function deleteStoredCreatorSocialAccountForAuthUser(seedRecords: CreatorRecord[], authUserId: string, platform: string) {
-  seedCreatorDatabase(seedRecords);
+export async function deleteStoredCreatorSocialAccountForAuthUser(seedRecords: CreatorRecord[], authUserId: string, platform: string) {
+  await seedCreatorDatabase(seedRecords);
 
-  const db = getReachfypDatabase();
-  const existingByAuthUser = db.prepare("SELECT * FROM creators WHERE auth_user_id = ? LIMIT 1").get(authUserId) as CreatorRow | undefined;
+  const db = await getReachfypDatabase();
+  const existingByAuthUser = await db.prepare("SELECT * FROM creators WHERE auth_user_id = ? LIMIT 1").get<CreatorRow>([authUserId]);
 
   if (!existingByAuthUser) {
     return { ok: false as const, error: "profile-not-found" as const };
@@ -682,15 +629,15 @@ export function deleteStoredCreatorSocialAccountForAuthUser(seedRecords: Creator
     socialAccounts: nextSocialAccounts,
   };
 
-  saveCreatorRecordForAuthUser(db, nextCreator, authUserId, false);
+  await saveCreatorRecordForAuthUser(db, nextCreator, authUserId, false);
   return { ok: true as const, creator: nextCreator };
 }
 
-export function syncStoredCreatorSocialAccountForAuthUser(seedRecords: CreatorRecord[], authUserId: string, platform: string) {
-  seedCreatorDatabase(seedRecords);
+export async function syncStoredCreatorSocialAccountForAuthUser(seedRecords: CreatorRecord[], authUserId: string, platform: string) {
+  await seedCreatorDatabase(seedRecords);
 
-  const db = getReachfypDatabase();
-  const existingByAuthUser = db.prepare("SELECT * FROM creators WHERE auth_user_id = ? LIMIT 1").get(authUserId) as CreatorRow | undefined;
+  const db = await getReachfypDatabase();
+  const existingByAuthUser = await db.prepare("SELECT * FROM creators WHERE auth_user_id = ? LIMIT 1").get<CreatorRow>([authUserId]);
 
   if (!existingByAuthUser) {
     return { ok: false as const, error: "profile-not-found" as const };
@@ -721,13 +668,13 @@ export function syncStoredCreatorSocialAccountForAuthUser(seedRecords: CreatorRe
     socialAccounts: nextSocialAccounts,
   };
 
-  saveCreatorRecordForAuthUser(db, nextCreator, authUserId, false);
+  await saveCreatorRecordForAuthUser(db, nextCreator, authUserId, false);
   return { ok: true as const, creator: nextCreator };
 }
 
-export function deleteStoredCreatorRecordForAuthUser(seedRecords: CreatorRecord[], authUserId: string) {
-  seedCreatorDatabase(seedRecords);
+export async function deleteStoredCreatorRecordForAuthUser(seedRecords: CreatorRecord[], authUserId: string) {
+  await seedCreatorDatabase(seedRecords);
 
-  const result = getReachfypDatabase().prepare("DELETE FROM creators WHERE auth_user_id = ?").run(authUserId);
+  const result = await (await getReachfypDatabase()).prepare("DELETE FROM creators WHERE auth_user_id = ?").run([authUserId]);
   return result.changes > 0;
 }

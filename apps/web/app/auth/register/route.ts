@@ -1,6 +1,7 @@
 import { createEmailVerificationRequestForUser, registerAuthUser } from "@reachfyp/api";
 import { NextRequest, NextResponse } from "next/server";
 import { attachSessionCookie } from "../../../lib/auth/session";
+import { sendEmailVerificationEmail } from "../../../lib/mailer/auth-mailer";
 
 const allowedModes = new Set([
   "sign-in",
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest) {
   const redirectTo = getSafeRedirectPath(String(formData.get("redirectTo") ?? ""));
   const mode = getSafeMode(String(formData.get("mode") ?? ""));
   const reservedCreatorUsername = String(formData.get("reservedCreatorUsername") ?? "");
-  const result = registerAuthUser({
+  const result = await registerAuthUser({
     name: String(formData.get("name") ?? ""),
     companyName: String(formData.get("companyName") ?? ""),
     reservedCreatorUsername,
@@ -75,20 +76,30 @@ export async function POST(request: NextRequest) {
   }
 
   const successUrl = new URL(redirectTo ?? "/auth?status=registered", request.url);
-  const verificationResult = createEmailVerificationRequestForUser(result.user.id);
+  const verificationResult = await createEmailVerificationRequestForUser(result.user.id);
 
   if (successUrl.pathname === "/auth") {
     successUrl.searchParams.set("status", "registered");
 
     if (verificationResult.ok) {
-      successUrl.searchParams.set("verificationStatus", verificationResult.alreadyVerified ? "already-verified" : "verification-sent");
+      if (verificationResult.alreadyVerified) {
+        successUrl.searchParams.set("verificationStatus", "already-verified");
+      } else if (verificationResult.token) {
+        try {
+          const delivery = await sendEmailVerificationEmail(result.user.name, result.user.email, verificationResult.token);
+          successUrl.searchParams.set("verificationStatus", "verification-sent");
 
-      if (process.env.NODE_ENV !== "production" && verificationResult.token) {
-        successUrl.searchParams.set("verifyEmailToken", verificationResult.token);
+          if (delivery.previewToken) {
+            successUrl.searchParams.set("verifyEmailToken", delivery.previewToken);
+          }
+        } catch (error) {
+          console.error("Failed to send verification email after registration", error);
+          successUrl.searchParams.set("error", "verification-send-failed");
+        }
       }
     }
   }
 
   const response = NextResponse.redirect(successUrl, 303);
-  return attachSessionCookie(response, result.user.id);
+  return await attachSessionCookie(response, result.user.id);
 }

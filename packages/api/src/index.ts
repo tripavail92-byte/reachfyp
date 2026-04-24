@@ -1,4 +1,16 @@
 export {
+  getReachfypDatabaseConfig,
+  getReachfypDatabaseProvider,
+  getReachfypDatabaseUrl,
+  getReachfypSqliteDatabasePath,
+} from "./database-config";
+
+export {
+  getReachfypPostgresBootstrapSql,
+  reachfypBootstrapStatements,
+} from "./database-schema";
+
+export {
   getCreatorUsernameAvailability,
   deleteCreatorRecordForAuthUser,
   deleteCreatorPackageForAuthUser,

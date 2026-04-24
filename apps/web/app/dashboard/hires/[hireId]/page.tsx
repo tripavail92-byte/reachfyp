@@ -37,7 +37,7 @@ export default async function HireDetailPage({ params, searchParams }: HireDetai
     redirect(`/auth?mode=sign-in&redirectTo=${encodeURIComponent(`/dashboard/hires/${hireId}`)}`);
   }
 
-  const hireDetail = getInstantHireDetailById(hireId);
+  const hireDetail = await getInstantHireDetailById(hireId);
 
   if (!hireDetail) {
     notFound();

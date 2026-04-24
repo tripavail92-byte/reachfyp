@@ -10,7 +10,7 @@ type CreatorSignupPageProps = {
 
 export default async function CreatorSignupPage({ searchParams }: CreatorSignupPageProps) {
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const availability = getCreatorUsernameAvailability(String(resolvedSearchParams?.username ?? ""));
+  const availability = await getCreatorUsernameAvailability(String(resolvedSearchParams?.username ?? ""));
 
   const creatorUrl = new URL("/creator", "http://localhost");
 

@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
       throw new Error("missing-google-email");
     }
 
-    const upsertResult = upsertGoogleAuthUser({
+    const upsertResult = await upsertGoogleAuthUser({
       googleSubject,
       email,
       name: getGoogleDisplayName(name, email, context.flow),
@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
 
     const response = NextResponse.redirect(new URL(context.redirectTo, request.url), 303);
     clearGoogleAuthContext(response);
-    return attachSessionCookie(response, upsertResult.user.id);
+    return await attachSessionCookie(response, upsertResult.user.id);
   } catch {
     return clearGoogleAuthContext(NextResponse.redirect(getFailureUrl(request, context.flow, failureParams("google-auth-failed")), 303));
   }

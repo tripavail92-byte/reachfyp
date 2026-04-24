@@ -32,13 +32,13 @@ export default async function ConversationPage({ params, searchParams }: Convers
     redirect(`/auth?mode=sign-in&redirectTo=${encodeURIComponent(`/dashboard/messages/${conversationId}`)}`);
   }
 
-  const conversation = getConversationById(conversationId);
+  const conversation = await getConversationById(conversationId);
 
   if (!conversation) {
     notFound();
   }
 
-  const hireDetail = getInstantHireDetailById(conversation.referenceId);
+  const hireDetail = await getInstantHireDetailById(conversation.referenceId);
 
   if (!hireDetail) {
     notFound();
@@ -49,10 +49,10 @@ export default async function ConversationPage({ params, searchParams }: Convers
   }
 
   if (currentUser.role !== "admin") {
-    markConversationMessagesRead(conversation.id, currentUser.id);
+    await markConversationMessagesRead(conversation.id, currentUser.id);
   }
 
-  const messages = listMessagesForConversation(conversation.id);
+  const messages = await listMessagesForConversation(conversation.id);
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const feedbackMessage =
     (resolvedSearchParams?.error ? messageErrorMessages[resolvedSearchParams.error] : undefined) ??

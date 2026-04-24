@@ -8,6 +8,7 @@ All tables live in one database for one product: reachfyp.com (creator marketpla
 - Auth and marketplace records currently live in the same shared database foundation.
 - The shipped account model uses `auth_users`, `auth_sessions`, `auth_password_reset_tokens`, and `auth_email_verification_tokens`.
 - Public creator usernames are not assigned at anonymous browse time. A creator first reserves a username during onboarding, then consumes that username when completing the creator profile flow.
+- Approved production evolution for Milestone 5 keeps the same logical auth and marketplace tables but moves them to managed Postgres under the existing app-owned server boundary.
 
 ## Data Access Model
 
@@ -69,6 +70,7 @@ Access class:
 Notes:
 - Browser sessions are delivered through the `reachfyp_session` cookie.
 - The raw session token is never stored directly; only the hash is persisted.
+- Approved production hardening keeps database-backed sessions instead of JWTs and moves the production cookie to a host-only secure session cookie with server-owned rotation.
 
 ---
 
@@ -111,6 +113,7 @@ Notes:
 - Verification tokens are single use and short lived.
 - Email/password registration issues a verification token immediately after account creation.
 - Non-production builds may surface preview links while real outbound email delivery remains a deployment concern.
+- Approved production email delivery for these tokens is Postmark, while preview links remain development-only.
 
 ---
 

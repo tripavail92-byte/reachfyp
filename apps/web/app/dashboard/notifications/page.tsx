@@ -23,7 +23,7 @@ export default async function NotificationsPage({ searchParams }: NotificationsP
     redirect("/auth?mode=sign-in&redirectTo=%2Fdashboard%2Fnotifications");
   }
 
-  const notifications = listNotificationsForUser(currentUser.id);
+  const notifications = await listNotificationsForUser(currentUser.id);
   const unreadNotifications = notifications.filter((notification) => !notification.readAt);
   const readNotifications = notifications.filter((notification) => Boolean(notification.readAt));
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;

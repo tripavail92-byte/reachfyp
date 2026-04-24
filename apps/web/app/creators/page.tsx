@@ -15,7 +15,7 @@ export default async function CreatorsMarketplacePage({ searchParams }: Creators
     resolvedSearchParams?.previewState === "empty" || resolvedSearchParams?.previewState === "error"
       ? resolvedSearchParams.previewState
       : "live";
-  const totalCreators = getCreatorRecordTotal();
+  const totalCreators = await getCreatorRecordTotal();
 
   return (
     <main className="app-shell">

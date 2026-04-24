@@ -20,8 +20,8 @@ export default async function BrandHiresPage() {
     redirect("/admin/hires");
   }
 
-  const hires = listInstantHiresForBrand(currentUser.id);
-  const notifications = listNotificationsForUser(currentUser.id);
+  const hires = await listInstantHiresForBrand(currentUser.id);
+  const notifications = await listNotificationsForUser(currentUser.id);
   const queueGroups = [
     {
       title: "Needs review",

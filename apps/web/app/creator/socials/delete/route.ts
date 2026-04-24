@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
 
   const formData = await request.formData();
   const platform = String(formData.get("platform") ?? "").trim();
-  const result = deleteCreatorSocialAccountForAuthUser(currentUser.id, platform);
+  const result = await deleteCreatorSocialAccountForAuthUser(currentUser.id, platform);
 
   if (!result.ok) {
     return NextResponse.redirect(getRedirectUrl(request, { error: result.error }), 303);

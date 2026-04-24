@@ -43,7 +43,7 @@ function parsePreviewState(rawValue: string | null) {
   return "live" as const;
 }
 
-export function GET(request: NextRequest) {
+export async function GET(request: NextRequest) {
   const filters = parseFilters(request.nextUrl.searchParams.get("filters"));
   const sort = parseSort(request.nextUrl.searchParams.get("sort"));
   const page = parsePositiveInteger(request.nextUrl.searchParams.get("page"), 1);
@@ -54,7 +54,7 @@ export function GET(request: NextRequest) {
     return NextResponse.json({ message: "Previewed request failure for marketplace error-state verification." }, { status: 500 });
   }
 
-  const response = getCreatorMarketplaceResponse({
+  const response = await getCreatorMarketplaceResponse({
     filters,
     sort,
     page,

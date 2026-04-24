@@ -23,7 +23,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ hi
   const formData = await request.formData();
   const action = String(formData.get("action") ?? "").trim();
   const note = String(formData.get("note") ?? "").trim();
-  const result = adminModerateInstantHire({
+  const result = await adminModerateInstantHire({
     hireId,
     action: action === "force_release" ? "force_release" : "force_refund",
     note,

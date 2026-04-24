@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getReachfypDatabase } from "./creator-database";
+import { listTableColumns, type ReachfypDatabase } from "./database-client";
+import { ensureReachfypBaseSchema } from "./database-schema";
 import { getCreatorPackageByCheckoutId } from "./creator-records";
 import { listAuthUsersByRole } from "./auth-records";
 
@@ -245,47 +247,29 @@ type PayoutRequestRow = {
 const localSystemSenderId = "system";
 const defaultBrandWalletBalance = 10000;
 
-function ensureTableColumns(
+async function ensureTableColumns(
   tableName: string,
   columns: Array<{
     name: string;
     definition: string;
   }>,
 ) {
-  const db = getReachfypDatabase();
-  const existingColumns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  const db = await getReachfypDatabase();
+  const existingColumns = await listTableColumns(db, tableName);
   const existingColumnNames = new Set(existingColumns.map((column) => column.name));
 
-  columns.forEach((column) => {
+  for (const column of columns) {
     if (!existingColumnNames.has(column.name)) {
-      db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${column.name} ${column.definition}`);
+      await db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${column.name} ${column.definition}`);
     }
-  });
+  }
 }
 
-function ensureInstantHireTables() {
-  const db = getReachfypDatabase();
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS instant_hires (
-      id TEXT PRIMARY KEY,
-      package_id TEXT NOT NULL,
-      brand_user_id TEXT NOT NULL,
-      creator_username TEXT NOT NULL,
-      creator_name TEXT NOT NULL,
-      package_title TEXT NOT NULL,
-      package_price TEXT NOT NULL,
-      agreed_price TEXT NOT NULL,
-      delivery_deadline TEXT NOT NULL,
-      brief TEXT NOT NULL,
-      hire_type TEXT NOT NULL,
-      status TEXT NOT NULL,
-      escrow_status TEXT NOT NULL,
-      tracking_link TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    )
-  `);
+async function ensureInstantHireTables() {
+  const db = await getReachfypDatabase();
+  await ensureReachfypBaseSchema(db);
 
-  ensureTableColumns("instant_hires", [
+  await ensureTableColumns("instant_hires", [
     { name: "creator_participant_id", definition: "TEXT" },
     { name: "creator_auth_user_id", definition: "TEXT" },
     { name: "conversation_id", definition: "TEXT" },
@@ -295,102 +279,7 @@ function ensureInstantHireTables() {
     { name: "updated_at", definition: "TEXT" },
   ]);
 
-  db.prepare("UPDATE instant_hires SET updated_at = created_at WHERE updated_at IS NULL").run();
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS conversations (
-      id TEXT PRIMARY KEY,
-      type TEXT NOT NULL,
-      reference_id TEXT NOT NULL,
-      participant_ids_json TEXT NOT NULL,
-      last_message_at TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    )
-  `);
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS deliverables (
-      id TEXT PRIMARY KEY,
-      hire_id TEXT NOT NULL,
-      creator_user_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      description TEXT NOT NULL,
-      file_urls_json TEXT NOT NULL,
-      external_url TEXT NOT NULL,
-      notes TEXT NOT NULL,
-      revision_number INTEGER NOT NULL,
-      status TEXT NOT NULL,
-      review_feedback TEXT,
-      submitted_at TEXT NOT NULL,
-      reviewed_at TEXT,
-      approved_at TEXT
-    )
-  `);
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS messages (
-      id TEXT PRIMARY KEY,
-      conversation_id TEXT NOT NULL,
-      sender_id TEXT NOT NULL,
-      content TEXT NOT NULL,
-      media_urls_json TEXT NOT NULL,
-      read_at TEXT,
-      created_at TEXT NOT NULL
-    )
-  `);
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS wallet_accounts (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL UNIQUE,
-      balance REAL NOT NULL,
-      held_balance REAL NOT NULL,
-      currency TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `);
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS wallet_transactions (
-      id TEXT PRIMARY KEY,
-      wallet_id TEXT NOT NULL,
-      type TEXT NOT NULL,
-      amount REAL NOT NULL,
-      currency TEXT NOT NULL,
-      reference_type TEXT NOT NULL,
-      reference_id TEXT NOT NULL,
-      note TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    )
-  `);
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS notifications (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      body TEXT NOT NULL,
-      link TEXT NOT NULL,
-      read_at TEXT,
-      created_at TEXT NOT NULL
-    )
-  `);
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS payout_requests (
-      id TEXT PRIMARY KEY,
-      creator_user_id TEXT NOT NULL,
-      wallet_id TEXT NOT NULL,
-      amount REAL NOT NULL,
-      currency TEXT NOT NULL,
-      status TEXT NOT NULL,
-      note TEXT NOT NULL,
-      admin_note TEXT,
-      created_at TEXT NOT NULL,
-      reviewed_at TEXT
-    )
-  `);
+  await db.prepare("UPDATE instant_hires SET updated_at = created_at WHERE updated_at IS NULL").run();
 
   return db;
 }
@@ -525,17 +414,16 @@ function toPayoutRequestRecord(row: PayoutRequestRow): PayoutRequestRecord {
   };
 }
 
-function getWalletAccountRowByUserId(userId: string) {
-  return ensureInstantHireTables().prepare("SELECT * FROM wallet_accounts WHERE user_id = ? LIMIT 1").get(userId) as WalletAccountRow | undefined;
+async function getWalletAccountRowByUserId(userId: string) {
+  return (await ensureInstantHireTables()).prepare("SELECT * FROM wallet_accounts WHERE user_id = ? LIMIT 1").get<WalletAccountRow>([userId]);
 }
 
-function getWalletAccountRowById(walletId: string) {
-  return ensureInstantHireTables().prepare("SELECT * FROM wallet_accounts WHERE id = ? LIMIT 1").get(walletId) as WalletAccountRow | undefined;
+async function getWalletAccountRowById(walletId: string) {
+  return (await ensureInstantHireTables()).prepare("SELECT * FROM wallet_accounts WHERE id = ? LIMIT 1").get<WalletAccountRow>([walletId]);
 }
 
-function ensureWalletAccount(userId: string, defaultBalance: number, currency: string, timestamp: string) {
-  const db = ensureInstantHireTables();
-  const existingWallet = getWalletAccountRowByUserId(userId);
+async function ensureWalletAccount(db: ReachfypDatabase, userId: string, defaultBalance: number, currency: string, timestamp: string) {
+  const existingWallet = await getWalletAccountRowByUserId(userId);
 
   if (existingWallet) {
     return existingWallet;
@@ -550,7 +438,7 @@ function ensureWalletAccount(userId: string, defaultBalance: number, currency: s
     updated_at: timestamp,
   };
 
-  db.prepare(
+  await db.prepare(
     `INSERT INTO wallet_accounts (id, user_id, balance, held_balance, currency, updated_at)
      VALUES (:id, :user_id, :balance, :held_balance, :currency, :updated_at)`
   ).run(walletRow);
@@ -558,7 +446,7 @@ function ensureWalletAccount(userId: string, defaultBalance: number, currency: s
   return walletRow;
 }
 
-function createWalletTransaction(db: ReturnType<typeof ensureInstantHireTables>, input: {
+async function createWalletTransaction(db: ReachfypDatabase, input: {
   walletId: string;
   type: WalletTransaction["type"];
   amount: number;
@@ -569,7 +457,7 @@ function createWalletTransaction(db: ReturnType<typeof ensureInstantHireTables>,
   createdAt: string;
 }) {
   const transactionId = randomUUID();
-  db.prepare(
+  await db.prepare(
     `INSERT INTO wallet_transactions (id, wallet_id, type, amount, currency, reference_type, reference_id, note, created_at)
      VALUES (:id, :wallet_id, :type, :amount, :currency, :reference_type, :reference_id, :note, :created_at)`
   ).run({
@@ -587,57 +475,57 @@ function createWalletTransaction(db: ReturnType<typeof ensureInstantHireTables>,
   return transactionId;
 }
 
-function getConversationRowById(conversationId: string) {
-  return ensureInstantHireTables().prepare("SELECT * FROM conversations WHERE id = ? LIMIT 1").get(conversationId) as ConversationRow | undefined;
+async function getConversationRowById(conversationId: string) {
+  return (await ensureInstantHireTables()).prepare("SELECT * FROM conversations WHERE id = ? LIMIT 1").get<ConversationRow>([conversationId]);
 }
 
-function getMessageRowsByConversationId(conversationId: string) {
-  return ensureInstantHireTables()
+async function getMessageRowsByConversationId(conversationId: string) {
+  return (await ensureInstantHireTables())
     .prepare("SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC")
-    .all(conversationId) as MessageRow[];
+    .all<MessageRow>([conversationId]);
 }
 
-function getDeliverableRowById(deliverableId: string) {
-  return ensureInstantHireTables().prepare("SELECT * FROM deliverables WHERE id = ? LIMIT 1").get(deliverableId) as DeliverableRow | undefined;
+async function getDeliverableRowById(deliverableId: string) {
+  return (await ensureInstantHireTables()).prepare("SELECT * FROM deliverables WHERE id = ? LIMIT 1").get<DeliverableRow>([deliverableId]);
 }
 
-function getDeliverableRowsByHireId(hireId: string) {
-  return ensureInstantHireTables()
+async function getDeliverableRowsByHireId(hireId: string) {
+  return (await ensureInstantHireTables())
     .prepare("SELECT * FROM deliverables WHERE hire_id = ? ORDER BY revision_number ASC, submitted_at ASC")
-    .all(hireId) as DeliverableRow[];
+    .all<DeliverableRow>([hireId]);
 }
 
-function getLatestDeliverableRowByHireId(hireId: string) {
-  return ensureInstantHireTables()
+async function getLatestDeliverableRowByHireId(hireId: string) {
+  return (await ensureInstantHireTables())
     .prepare("SELECT * FROM deliverables WHERE hire_id = ? ORDER BY revision_number DESC, submitted_at DESC LIMIT 1")
-    .get(hireId) as DeliverableRow | undefined;
+    .get<DeliverableRow>([hireId]);
 }
 
-function getWalletTransactionRowsByWalletId(walletId: string) {
-  return ensureInstantHireTables()
+async function getWalletTransactionRowsByWalletId(walletId: string) {
+  return (await ensureInstantHireTables())
     .prepare("SELECT * FROM wallet_transactions WHERE wallet_id = ? ORDER BY created_at DESC")
-    .all(walletId) as WalletTransactionRow[];
+    .all<WalletTransactionRow>([walletId]);
 }
 
-function getNotificationRowsByUserId(userId: string) {
-  return ensureInstantHireTables()
+async function getNotificationRowsByUserId(userId: string) {
+  return (await ensureInstantHireTables())
     .prepare("SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC")
-    .all(userId) as NotificationRow[];
+    .all<NotificationRow>([userId]);
 }
 
-function getPayoutRequestRowById(payoutRequestId: string) {
-  return ensureInstantHireTables().prepare("SELECT * FROM payout_requests WHERE id = ? LIMIT 1").get(payoutRequestId) as PayoutRequestRow | undefined;
+async function getPayoutRequestRowById(payoutRequestId: string) {
+  return (await ensureInstantHireTables()).prepare("SELECT * FROM payout_requests WHERE id = ? LIMIT 1").get<PayoutRequestRow>([payoutRequestId]);
 }
 
-function getPendingPayoutAmountForCreator(creatorUserId: string) {
-  const row = ensureInstantHireTables()
+async function getPendingPayoutAmountForCreator(creatorUserId: string) {
+  const row = await (await ensureInstantHireTables())
     .prepare("SELECT COALESCE(SUM(amount), 0) as total FROM payout_requests WHERE creator_user_id = ? AND status = 'pending'")
-    .get(creatorUserId) as { total: number };
+    .get<{ total: number }>([creatorUserId]);
 
-  return row.total;
+  return row?.total ?? 0;
 }
 
-function createNotification(db: ReturnType<typeof ensureInstantHireTables>, input: {
+async function createNotification(db: ReachfypDatabase, input: {
   userId: string;
   type: NotificationType;
   title: string;
@@ -645,21 +533,21 @@ function createNotification(db: ReturnType<typeof ensureInstantHireTables>, inpu
   link: string;
   createdAt: string;
 }) {
-  db.prepare(
+  await db.prepare(
     `INSERT INTO notifications (id, user_id, type, title, body, link, read_at, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(`notif_${randomUUID()}`, input.userId, input.type, input.title, input.body, input.link, null, input.createdAt);
+  ).run([`notif_${randomUUID()}`, input.userId, input.type, input.title, input.body, input.link, null, input.createdAt]);
 }
 
-function notifyAdmins(db: ReturnType<typeof ensureInstantHireTables>, input: {
+async function notifyAdmins(db: ReachfypDatabase, input: {
   type: NotificationType;
   title: string;
   body: string;
   link: string;
   createdAt: string;
 }) {
-  listAuthUsersByRole("admin").forEach((adminUser) => {
-    createNotification(db, {
+  for (const adminUser of await listAuthUsersByRole("admin")) {
+    await createNotification(db, {
       userId: adminUser.id,
       type: input.type,
       title: input.title,
@@ -667,75 +555,75 @@ function notifyAdmins(db: ReturnType<typeof ensureInstantHireTables>, input: {
       link: input.link,
       createdAt: input.createdAt,
     });
-  });
+  }
 }
 
-export function getWalletAccountByUserId(userId: string) {
-  const walletRow = getWalletAccountRowByUserId(userId);
+export async function getWalletAccountByUserId(userId: string) {
+  const walletRow = await getWalletAccountRowByUserId(userId);
   return walletRow ? toWalletAccount(walletRow) : undefined;
 }
 
-export function getConversationById(conversationId: string) {
-  const row = getConversationRowById(conversationId);
+export async function getConversationById(conversationId: string) {
+  const row = await getConversationRowById(conversationId);
   return row ? toConversationRecord(row) : undefined;
 }
 
-export function listMessagesForConversation(conversationId: string) {
-  return getMessageRowsByConversationId(conversationId).map(toMessageRecord);
+export async function listMessagesForConversation(conversationId: string) {
+  return (await getMessageRowsByConversationId(conversationId)).map(toMessageRecord);
 }
 
-export function listDeliverablesForHire(hireId: string) {
-  return getDeliverableRowsByHireId(hireId).map(toDeliverableRecord);
+export async function listDeliverablesForHire(hireId: string) {
+  return (await getDeliverableRowsByHireId(hireId)).map(toDeliverableRecord);
 }
 
-export function listInstantHiresForCreator(creatorUserId: string) {
-  const rows = ensureInstantHireTables()
+export async function listInstantHiresForCreator(creatorUserId: string) {
+  const rows = await (await ensureInstantHireTables())
     .prepare("SELECT * FROM instant_hires WHERE creator_auth_user_id = ? ORDER BY created_at DESC")
-    .all(creatorUserId) as InstantHireRow[];
+    .all<InstantHireRow>([creatorUserId]);
 
   return rows.map(toInstantHireRecord);
 }
 
-export function listInstantHiresForBrand(brandUserId: string) {
-  const rows = ensureInstantHireTables()
+export async function listInstantHiresForBrand(brandUserId: string) {
+  const rows = await (await ensureInstantHireTables())
     .prepare("SELECT * FROM instant_hires WHERE brand_user_id = ? ORDER BY created_at DESC")
-    .all(brandUserId) as InstantHireRow[];
+    .all<InstantHireRow>([brandUserId]);
 
   return rows.map(toInstantHireRecord);
 }
 
-export function listAllInstantHires() {
-  const rows = ensureInstantHireTables().prepare("SELECT * FROM instant_hires ORDER BY created_at DESC").all() as InstantHireRow[];
+export async function listAllInstantHires() {
+  const rows = await (await ensureInstantHireTables()).prepare("SELECT * FROM instant_hires ORDER BY created_at DESC").all<InstantHireRow>();
   return rows.map(toInstantHireRecord);
 }
 
-export function listNotificationsForUser(userId: string) {
-  return getNotificationRowsByUserId(userId).map(toNotificationRecord);
+export async function listNotificationsForUser(userId: string) {
+  return (await getNotificationRowsByUserId(userId)).map(toNotificationRecord);
 }
 
-export function markNotificationRead(notificationId: string, userId: string) {
-  const db = ensureInstantHireTables();
+export async function markNotificationRead(notificationId: string, userId: string) {
+  const db = await ensureInstantHireTables();
   const readAt = new Date().toISOString();
-  const result = db.prepare("UPDATE notifications SET read_at = ? WHERE id = ? AND user_id = ? AND read_at IS NULL").run(readAt, notificationId, userId);
+  const result = await db.prepare("UPDATE notifications SET read_at = ? WHERE id = ? AND user_id = ? AND read_at IS NULL").run([readAt, notificationId, userId]);
   return result.changes > 0;
 }
 
-export function markAllNotificationsRead(userId: string) {
+export async function markAllNotificationsRead(userId: string) {
   const readAt = new Date().toISOString();
-  return ensureInstantHireTables().prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL").run(readAt, userId).changes;
+  return (await (await ensureInstantHireTables()).prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL").run([readAt, userId])).changes;
 }
 
-export function markConversationMessagesRead(conversationId: string, viewerId: string) {
+export async function markConversationMessagesRead(conversationId: string, viewerId: string) {
   const readAt = new Date().toISOString();
-  return ensureInstantHireTables().prepare("UPDATE messages SET read_at = ? WHERE conversation_id = ? AND sender_id != ? AND read_at IS NULL").run(readAt, conversationId, viewerId).changes;
+  return (await (await ensureInstantHireTables()).prepare("UPDATE messages SET read_at = ? WHERE conversation_id = ? AND sender_id != ? AND read_at IS NULL").run([readAt, conversationId, viewerId])).changes;
 }
 
-export function postMessageToConversation(input: {
+export async function postMessageToConversation(input: {
   conversationId: string;
   senderId: string;
   content: string;
 }) {
-  const conversation = getConversationById(input.conversationId);
+  const conversation = await getConversationById(input.conversationId);
 
   if (!conversation || !conversation.participantIds.includes(input.senderId)) {
     return { ok: false as const, error: "not-authorized" as const };
@@ -747,23 +635,19 @@ export function postMessageToConversation(input: {
     return { ok: false as const, error: "missing-fields" as const };
   }
 
-  const db = ensureInstantHireTables();
+  const db = await ensureInstantHireTables();
   const createdAt = new Date().toISOString();
 
-  db.exec("BEGIN");
-
-  try {
-    appendConversationMessage(db, {
+  await db.transaction(async (transactionDatabase) => {
+    await appendConversationMessage(transactionDatabase, {
       conversationId: input.conversationId,
       senderId: input.senderId,
       content,
       createdAt,
     });
 
-    conversation.participantIds
-      .filter((participantId) => participantId !== input.senderId && !participantId.startsWith("creator:"))
-      .forEach((participantId) => {
-        createNotification(db, {
+    for (const participantId of conversation.participantIds.filter((value) => value !== input.senderId && !value.startsWith("creator:"))) {
+      await createNotification(transactionDatabase, {
           userId: participantId,
           type: "message_received",
           title: "New hire message",
@@ -771,42 +655,37 @@ export function postMessageToConversation(input: {
           link: `/dashboard/messages/${input.conversationId}`,
           createdAt,
         });
-      });
-
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+    }
+  });
 
   return { ok: true as const };
 }
 
-export function listPayoutRequestsForCreator(creatorUserId: string) {
-  return (ensureInstantHireTables()
+export async function listPayoutRequestsForCreator(creatorUserId: string) {
+  return (await (await ensureInstantHireTables())
     .prepare("SELECT * FROM payout_requests WHERE creator_user_id = ? ORDER BY created_at DESC")
-    .all(creatorUserId) as PayoutRequestRow[]).map(toPayoutRequestRecord);
+    .all<PayoutRequestRow>([creatorUserId])).map(toPayoutRequestRecord);
 }
 
-export function listAllPayoutRequests() {
-  return (ensureInstantHireTables().prepare("SELECT * FROM payout_requests ORDER BY created_at DESC").all() as PayoutRequestRow[]).map(toPayoutRequestRecord);
+export async function listAllPayoutRequests() {
+  return (await (await ensureInstantHireTables()).prepare("SELECT * FROM payout_requests ORDER BY created_at DESC").all<PayoutRequestRow>()).map(toPayoutRequestRecord);
 }
 
-export function getInstantHireRecordById(hireId: string) {
-  const row = ensureInstantHireTables().prepare("SELECT * FROM instant_hires WHERE id = ? LIMIT 1").get(hireId) as InstantHireRow | undefined;
+export async function getInstantHireRecordById(hireId: string) {
+  const row = await (await ensureInstantHireTables()).prepare("SELECT * FROM instant_hires WHERE id = ? LIMIT 1").get<InstantHireRow>([hireId]);
   return row ? toInstantHireRecord(row) : undefined;
 }
 
-export function getInstantHireDetailById(hireId: string): InstantHireDetail | undefined {
-  const hire = getInstantHireRecordById(hireId);
+export async function getInstantHireDetailById(hireId: string): Promise<InstantHireDetail | undefined> {
+  const hire = await getInstantHireRecordById(hireId);
 
   if (!hire) {
     return undefined;
   }
 
-  const conversation = getConversationById(hire.conversationId);
-  const brandWallet = getWalletAccountByUserId(hire.brandUserId);
-  const creatorWallet = getWalletAccountByUserId(hire.creatorParticipantId);
+  const conversation = await getConversationById(hire.conversationId);
+  const brandWallet = await getWalletAccountByUserId(hire.brandUserId);
+  const creatorWallet = await getWalletAccountByUserId(hire.creatorParticipantId);
 
   if (!conversation || !brandWallet || !creatorWallet) {
     return undefined;
@@ -815,50 +694,50 @@ export function getInstantHireDetailById(hireId: string): InstantHireDetail | un
   return {
     hire,
     conversation,
-    messages: listMessagesForConversation(conversation.id),
-    deliverables: listDeliverablesForHire(hire.id),
+    messages: await listMessagesForConversation(conversation.id),
+    deliverables: await listDeliverablesForHire(hire.id),
     brandWallet,
     creatorWallet,
-    brandTransactions: getWalletTransactionRowsByWalletId(brandWallet.id).map(toWalletTransaction),
-    creatorTransactions: getWalletTransactionRowsByWalletId(creatorWallet.id).map(toWalletTransaction),
+    brandTransactions: (await getWalletTransactionRowsByWalletId(brandWallet.id)).map(toWalletTransaction),
+    creatorTransactions: (await getWalletTransactionRowsByWalletId(creatorWallet.id)).map(toWalletTransaction),
   };
 }
 
-function appendConversationMessage(db: ReturnType<typeof ensureInstantHireTables>, input: {
+async function appendConversationMessage(db: ReachfypDatabase, input: {
   conversationId: string;
   senderId: string;
   content: string;
   createdAt: string;
   readAt?: string | null;
 }) {
-  db.prepare(
+  await db.prepare(
     `INSERT INTO messages (id, conversation_id, sender_id, content, media_urls_json, read_at, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(`msg_${randomUUID()}`, input.conversationId, input.senderId, input.content, JSON.stringify([]), input.readAt ?? null, input.createdAt);
+  ).run([`msg_${randomUUID()}`, input.conversationId, input.senderId, input.content, JSON.stringify([]), input.readAt ?? null, input.createdAt]);
 
-  db.prepare("UPDATE conversations SET last_message_at = ? WHERE id = ?").run(input.createdAt, input.conversationId);
+  await db.prepare("UPDATE conversations SET last_message_at = ? WHERE id = ?").run([input.createdAt, input.conversationId]);
 }
 
-function updateInstantHireState(db: ReturnType<typeof ensureInstantHireTables>, input: {
+async function updateInstantHireState(db: ReachfypDatabase, input: {
   hireId: string;
   status: InstantHireStatus;
   escrowStatus?: InstantHireEscrowStatus;
   updatedAt: string;
 }) {
   if (input.escrowStatus) {
-    db.prepare("UPDATE instant_hires SET status = ?, escrow_status = ?, updated_at = ? WHERE id = ?").run(input.status, input.escrowStatus, input.updatedAt, input.hireId);
+    await db.prepare("UPDATE instant_hires SET status = ?, escrow_status = ?, updated_at = ? WHERE id = ?").run([input.status, input.escrowStatus, input.updatedAt, input.hireId]);
     return;
   }
 
-  db.prepare("UPDATE instant_hires SET status = ?, updated_at = ? WHERE id = ?").run(input.status, input.updatedAt, input.hireId);
+  await db.prepare("UPDATE instant_hires SET status = ?, updated_at = ? WHERE id = ?").run([input.status, input.updatedAt, input.hireId]);
 }
 
-export function createPayoutRequest(input: {
+export async function createPayoutRequest(input: {
   creatorUserId: string;
   amount: number;
   note: string;
 }) {
-  const wallet = getWalletAccountByUserId(input.creatorUserId);
+  const wallet = await getWalletAccountByUserId(input.creatorUserId);
   const note = input.note.trim();
 
   if (!wallet) {
@@ -869,25 +748,23 @@ export function createPayoutRequest(input: {
     return { ok: false as const, error: "missing-fields" as const };
   }
 
-  const availableForRequest = wallet.balance - getPendingPayoutAmountForCreator(input.creatorUserId);
+  const availableForRequest = wallet.balance - await getPendingPayoutAmountForCreator(input.creatorUserId);
 
   if (availableForRequest < input.amount) {
     return { ok: false as const, error: "invalid-hire-state" as const };
   }
 
-  const db = ensureInstantHireTables();
+  const db = await ensureInstantHireTables();
   const createdAt = new Date().toISOString();
   const payoutRequestId = `payout_${randomUUID()}`;
 
-  db.exec("BEGIN");
-
-  try {
-    db.prepare(
+  await db.transaction(async (transactionDatabase) => {
+    await transactionDatabase.prepare(
       `INSERT INTO payout_requests (id, creator_user_id, wallet_id, amount, currency, status, note, admin_note, created_at, reviewed_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(payoutRequestId, input.creatorUserId, wallet.id, input.amount, wallet.currency, "pending", note, null, createdAt, null);
+    ).run([payoutRequestId, input.creatorUserId, wallet.id, input.amount, wallet.currency, "pending", note, null, createdAt, null]);
 
-    createNotification(db, {
+    await createNotification(transactionDatabase, {
       userId: input.creatorUserId,
       type: "payout_requested",
       title: "Payout request submitted",
@@ -896,30 +773,25 @@ export function createPayoutRequest(input: {
       createdAt,
     });
 
-    notifyAdmins(db, {
+    await notifyAdmins(transactionDatabase, {
       type: "payout_requested",
       title: "New payout request",
       body: `A creator requested a payout of $${input.amount.toFixed(2)}.`,
       link: "/admin/payouts",
       createdAt,
     });
+  });
 
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-
-  const payoutRequest = getPayoutRequestRowById(payoutRequestId);
+  const payoutRequest = await getPayoutRequestRowById(payoutRequestId);
   return payoutRequest ? { ok: true as const, payoutRequest: toPayoutRequestRecord(payoutRequest) } : { ok: false as const, error: "missing-fields" as const };
 }
 
-export function reviewPayoutRequest(input: {
+export async function reviewPayoutRequest(input: {
   payoutRequestId: string;
   adminNote: string;
   action: "approve" | "reject";
 }) {
-  const payoutRequest = getPayoutRequestRowById(input.payoutRequestId);
+  const payoutRequest = await getPayoutRequestRowById(input.payoutRequestId);
 
   if (!payoutRequest || payoutRequest.status !== "pending") {
     return { ok: false as const, error: "deliverable-not-found" as const };
@@ -931,29 +803,26 @@ export function reviewPayoutRequest(input: {
     return { ok: false as const, error: "missing-feedback" as const };
   }
 
-  const wallet = getWalletAccountRowById(payoutRequest.wallet_id);
+  const wallet = await getWalletAccountRowById(payoutRequest.wallet_id);
 
   if (!wallet) {
     return { ok: false as const, error: "not-authorized" as const };
   }
 
+  if (input.action === "approve" && wallet.balance < payoutRequest.amount) {
+    return { ok: false as const, error: "invalid-hire-state" as const };
+  }
+
   const reviewedAt = new Date().toISOString();
-  const db = ensureInstantHireTables();
+  const db = await ensureInstantHireTables();
 
-  db.exec("BEGIN");
-
-  try {
-    db.prepare("UPDATE payout_requests SET status = ?, admin_note = ?, reviewed_at = ? WHERE id = ?").run(input.action === "approve" ? "approved" : "rejected", adminNote, reviewedAt, payoutRequest.id);
+  await db.transaction(async (transactionDatabase) => {
+    await transactionDatabase.prepare("UPDATE payout_requests SET status = ?, admin_note = ?, reviewed_at = ? WHERE id = ?").run([input.action === "approve" ? "approved" : "rejected", adminNote, reviewedAt, payoutRequest.id]);
 
     if (input.action === "approve") {
-      if (wallet.balance < payoutRequest.amount) {
-        db.exec("ROLLBACK");
-        return { ok: false as const, error: "invalid-hire-state" as const };
-      }
+      await transactionDatabase.prepare("UPDATE wallet_accounts SET balance = ?, updated_at = ? WHERE id = ?").run([wallet.balance - payoutRequest.amount, reviewedAt, wallet.id]);
 
-      db.prepare("UPDATE wallet_accounts SET balance = ?, updated_at = ? WHERE id = ?").run(wallet.balance - payoutRequest.amount, reviewedAt, wallet.id);
-
-      createWalletTransaction(db, {
+      await createWalletTransaction(transactionDatabase, {
         walletId: wallet.id,
         type: "withdrawal",
         amount: payoutRequest.amount,
@@ -965,7 +834,7 @@ export function reviewPayoutRequest(input: {
       });
     }
 
-    createNotification(db, {
+    await createNotification(transactionDatabase, {
       userId: payoutRequest.creator_user_id,
       type: input.action === "approve" ? "payout_approved" : "payout_rejected",
       title: input.action === "approve" ? "Payout request approved" : "Payout request rejected",
@@ -973,23 +842,18 @@ export function reviewPayoutRequest(input: {
       link: "/creator/payouts",
       createdAt: reviewedAt,
     });
+  });
 
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-
-  const reviewed = getPayoutRequestRowById(payoutRequest.id);
+  const reviewed = await getPayoutRequestRowById(payoutRequest.id);
   return reviewed ? { ok: true as const, payoutRequest: toPayoutRequestRecord(reviewed) } : { ok: false as const, error: "deliverable-not-found" as const };
 }
 
-export function adminModerateInstantHire(input: {
+export async function adminModerateInstantHire(input: {
   hireId: string;
   action: "force_release" | "force_refund";
   note: string;
 }) {
-  const hire = getInstantHireRecordById(input.hireId);
+  const hire = await getInstantHireRecordById(input.hireId);
 
   if (!hire || hire.escrowStatus !== "held-local" || hire.status === "approved" || hire.status === "cancelled") {
     return { ok: false as const, error: "invalid-hire-state" as const };
@@ -1001,31 +865,33 @@ export function adminModerateInstantHire(input: {
     return { ok: false as const, error: "missing-feedback" as const };
   }
 
-  const db = ensureInstantHireTables();
   const actedAt = new Date().toISOString();
   const agreedPriceValue = parsePrice(hire.agreedPrice);
-  const brandWallet = getWalletAccountRowById(hire.brandWalletId);
-  const creatorWallet = getWalletAccountRowById(hire.creatorWalletId);
-  const latestDeliverable = getLatestDeliverableRowByHireId(hire.id);
+  const brandWallet = await getWalletAccountRowById(hire.brandWalletId);
+  const creatorWallet = await getWalletAccountRowById(hire.creatorWalletId);
+  const latestDeliverable = await getLatestDeliverableRowByHireId(hire.id);
 
   if (!brandWallet || !creatorWallet) {
     return { ok: false as const, error: "not-authorized" as const };
   }
 
-  db.exec("BEGIN");
+  if (input.action === "force_release" && (!latestDeliverable || brandWallet.held_balance < agreedPriceValue)) {
+    return { ok: false as const, error: "deliverable-not-found" as const };
+  }
 
-  try {
+  if (input.action === "force_refund" && brandWallet.held_balance < agreedPriceValue) {
+    return { ok: false as const, error: "invalid-hire-state" as const };
+  }
+
+  const db = await ensureInstantHireTables();
+
+  await db.transaction(async (transactionDatabase) => {
     if (input.action === "force_release") {
-      if (!latestDeliverable || brandWallet.held_balance < agreedPriceValue) {
-        db.exec("ROLLBACK");
-        return { ok: false as const, error: "deliverable-not-found" as const };
-      }
+      await transactionDatabase.prepare("UPDATE deliverables SET status = ?, review_feedback = ?, reviewed_at = ?, approved_at = ? WHERE id = ?").run(["approved", note, actedAt, actedAt, latestDeliverable!.id]);
+      await transactionDatabase.prepare("UPDATE wallet_accounts SET held_balance = ?, updated_at = ? WHERE id = ?").run([brandWallet.held_balance - agreedPriceValue, actedAt, brandWallet.id]);
+      await transactionDatabase.prepare("UPDATE wallet_accounts SET balance = ?, updated_at = ? WHERE id = ?").run([creatorWallet.balance + agreedPriceValue, actedAt, creatorWallet.id]);
 
-      db.prepare("UPDATE deliverables SET status = ?, review_feedback = ?, reviewed_at = ?, approved_at = ? WHERE id = ?").run("approved", note, actedAt, actedAt, latestDeliverable.id);
-      db.prepare("UPDATE wallet_accounts SET held_balance = ?, updated_at = ? WHERE id = ?").run(brandWallet.held_balance - agreedPriceValue, actedAt, brandWallet.id);
-      db.prepare("UPDATE wallet_accounts SET balance = ?, updated_at = ? WHERE id = ?").run(creatorWallet.balance + agreedPriceValue, actedAt, creatorWallet.id);
-
-      createWalletTransaction(db, {
+      await createWalletTransaction(transactionDatabase, {
         walletId: brandWallet.id,
         type: "escrow_release",
         amount: agreedPriceValue,
@@ -1036,7 +902,7 @@ export function adminModerateInstantHire(input: {
         createdAt: actedAt,
       });
 
-      createWalletTransaction(db, {
+      await createWalletTransaction(transactionDatabase, {
         walletId: creatorWallet.id,
         type: "payout",
         amount: agreedPriceValue,
@@ -1047,21 +913,16 @@ export function adminModerateInstantHire(input: {
         createdAt: actedAt,
       });
 
-      updateInstantHireState(db, {
+      await updateInstantHireState(transactionDatabase, {
         hireId: hire.id,
         status: "approved",
         escrowStatus: "released-local",
         updatedAt: actedAt,
       });
     } else {
-      if (brandWallet.held_balance < agreedPriceValue) {
-        db.exec("ROLLBACK");
-        return { ok: false as const, error: "invalid-hire-state" as const };
-      }
+      await transactionDatabase.prepare("UPDATE wallet_accounts SET balance = ?, held_balance = ?, updated_at = ? WHERE id = ?").run([brandWallet.balance + agreedPriceValue, brandWallet.held_balance - agreedPriceValue, actedAt, brandWallet.id]);
 
-      db.prepare("UPDATE wallet_accounts SET balance = ?, held_balance = ?, updated_at = ? WHERE id = ?").run(brandWallet.balance + agreedPriceValue, brandWallet.held_balance - agreedPriceValue, actedAt, brandWallet.id);
-
-      createWalletTransaction(db, {
+      await createWalletTransaction(transactionDatabase, {
         walletId: brandWallet.id,
         type: "refund",
         amount: agreedPriceValue,
@@ -1072,7 +933,7 @@ export function adminModerateInstantHire(input: {
         createdAt: actedAt,
       });
 
-      updateInstantHireState(db, {
+      await updateInstantHireState(transactionDatabase, {
         hireId: hire.id,
         status: "cancelled",
         escrowStatus: "refunded-local",
@@ -1080,14 +941,14 @@ export function adminModerateInstantHire(input: {
       });
     }
 
-    appendConversationMessage(db, {
+    await appendConversationMessage(transactionDatabase, {
       conversationId: hire.conversationId,
       senderId: localSystemSenderId,
       content: `Admin moderation action: ${input.action}. ${note}`,
       createdAt: actedAt,
     });
 
-    createNotification(db, {
+    await createNotification(transactionDatabase, {
       userId: hire.brandUserId,
       type: "admin_hire_action",
       title: "Admin updated a hire",
@@ -1097,7 +958,7 @@ export function adminModerateInstantHire(input: {
     });
 
     if (hire.creatorAuthUserId) {
-      createNotification(db, {
+      await createNotification(transactionDatabase, {
         userId: hire.creatorAuthUserId,
         type: "admin_hire_action",
         title: "Admin updated a hire",
@@ -1106,17 +967,12 @@ export function adminModerateInstantHire(input: {
         createdAt: actedAt,
       });
     }
+  });
 
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-
-  return { ok: true as const, hire: getInstantHireRecordById(hire.id) };
+  return { ok: true as const, hire: await getInstantHireRecordById(hire.id) };
 }
 
-export function submitDeliverableForHire(input: {
+export async function submitDeliverableForHire(input: {
   hireId: string;
   creatorUserId: string;
   title: string;
@@ -1125,7 +981,7 @@ export function submitDeliverableForHire(input: {
   notes: string;
   fileUrls?: string[];
 }) {
-  const hire = getInstantHireRecordById(input.hireId);
+  const hire = await getInstantHireRecordById(input.hireId);
 
   if (!hire) {
     return { ok: false as const, error: "hire-not-found" as const };
@@ -1153,7 +1009,7 @@ export function submitDeliverableForHire(input: {
     return { ok: false as const, error: "invalid-hire-state" as const };
   }
 
-  const latestDeliverable = getLatestDeliverableRowByHireId(hire.id);
+  const latestDeliverable = await getLatestDeliverableRowByHireId(hire.id);
 
   if (latestDeliverable?.status === "submitted") {
     return { ok: false as const, error: "deliverable-already-submitted" as const };
@@ -1162,12 +1018,10 @@ export function submitDeliverableForHire(input: {
   const submittedAt = new Date().toISOString();
   const deliverableId = `del_${randomUUID()}`;
   const revisionNumber = latestDeliverable ? latestDeliverable.revision_number + 1 : 1;
-  const db = ensureInstantHireTables();
+  const db = await ensureInstantHireTables();
 
-  db.exec("BEGIN");
-
-  try {
-    db.prepare(
+  await db.transaction(async (transactionDatabase) => {
+    await transactionDatabase.prepare(
       `INSERT INTO deliverables (
         id,
         hire_id,
@@ -1184,37 +1038,22 @@ export function submitDeliverableForHire(input: {
         reviewed_at,
         approved_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      deliverableId,
-      hire.id,
-      input.creatorUserId,
-      title,
-      description,
-      JSON.stringify(fileUrls),
-      externalUrl,
-      notes,
-      revisionNumber,
-      "submitted",
-      null,
-      submittedAt,
-      null,
-      null,
-    );
+    ).run([deliverableId, hire.id, input.creatorUserId, title, description, JSON.stringify(fileUrls), externalUrl, notes, revisionNumber, "submitted", null, submittedAt, null, null]);
 
-    updateInstantHireState(db, {
+    await updateInstantHireState(transactionDatabase, {
       hireId: hire.id,
       status: "submitted",
       updatedAt: submittedAt,
     });
 
-    appendConversationMessage(db, {
+    await appendConversationMessage(transactionDatabase, {
       conversationId: hire.conversationId,
       senderId: input.creatorUserId,
       content: `Deliverable ${revisionNumber} submitted: ${title}\n${description}\n${externalUrl}${notes ? `\n\nNotes: ${notes}` : ""}`,
       createdAt: submittedAt,
     });
 
-    createNotification(db, {
+    await createNotification(transactionDatabase, {
       userId: hire.brandUserId,
       type: "deliverable_submitted",
       title: "New deliverable submitted",
@@ -1223,14 +1062,10 @@ export function submitDeliverableForHire(input: {
       createdAt: submittedAt,
     });
 
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  });
 
-  const deliverable = getDeliverableRowById(deliverableId);
-  const nextHire = getInstantHireRecordById(hire.id);
+  const deliverable = await getDeliverableRowById(deliverableId);
+  const nextHire = await getInstantHireRecordById(hire.id);
 
   if (!deliverable || !nextHire) {
     return { ok: false as const, error: "hire-not-found" as const };
@@ -1239,13 +1074,13 @@ export function submitDeliverableForHire(input: {
   return { ok: true as const, deliverable: toDeliverableRecord(deliverable), hire: nextHire };
 }
 
-export function requestRevisionForDeliverable(input: {
+export async function requestRevisionForDeliverable(input: {
   hireId: string;
   deliverableId: string;
   brandUserId: string;
   feedback: string;
 }) {
-  const hire = getInstantHireRecordById(input.hireId);
+  const hire = await getInstantHireRecordById(input.hireId);
 
   if (!hire) {
     return { ok: false as const, error: "hire-not-found" as const };
@@ -1265,7 +1100,7 @@ export function requestRevisionForDeliverable(input: {
     return { ok: false as const, error: "missing-feedback" as const };
   }
 
-  const deliverable = getDeliverableRowById(input.deliverableId);
+  const deliverable = await getDeliverableRowById(input.deliverableId);
 
   if (!deliverable || deliverable.hire_id !== hire.id) {
     return { ok: false as const, error: "deliverable-not-found" as const };
@@ -1276,20 +1111,18 @@ export function requestRevisionForDeliverable(input: {
   }
 
   const reviewedAt = new Date().toISOString();
-  const db = ensureInstantHireTables();
+  const db = await ensureInstantHireTables();
 
-  db.exec("BEGIN");
+  await db.transaction(async (transactionDatabase) => {
+    await transactionDatabase.prepare("UPDATE deliverables SET status = ?, review_feedback = ?, reviewed_at = ? WHERE id = ?").run(["revision_requested", feedback, reviewedAt, deliverable.id]);
 
-  try {
-    db.prepare("UPDATE deliverables SET status = ?, review_feedback = ?, reviewed_at = ? WHERE id = ?").run("revision_requested", feedback, reviewedAt, deliverable.id);
-
-    updateInstantHireState(db, {
+    await updateInstantHireState(transactionDatabase, {
       hireId: hire.id,
       status: "revision_requested",
       updatedAt: reviewedAt,
     });
 
-    appendConversationMessage(db, {
+    await appendConversationMessage(transactionDatabase, {
       conversationId: hire.conversationId,
       senderId: input.brandUserId,
       content: `Revision requested on deliverable ${deliverable.revision_number}: ${feedback}`,
@@ -1297,7 +1130,7 @@ export function requestRevisionForDeliverable(input: {
     });
 
     if (hire.creatorAuthUserId) {
-      createNotification(db, {
+      await createNotification(transactionDatabase, {
         userId: hire.creatorAuthUserId,
         type: "revision_requested",
         title: "Revision requested",
@@ -1307,22 +1140,19 @@ export function requestRevisionForDeliverable(input: {
       });
     }
 
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  });
 
-  return { ok: true as const, hire: getInstantHireRecordById(hire.id), deliverable: getDeliverableRowById(deliverable.id) ? toDeliverableRecord(getDeliverableRowById(deliverable.id) as DeliverableRow) : undefined };
+  const nextDeliverable = await getDeliverableRowById(deliverable.id);
+  return { ok: true as const, hire: await getInstantHireRecordById(hire.id), deliverable: nextDeliverable ? toDeliverableRecord(nextDeliverable) : undefined };
 }
 
-export function approveDeliverableForHire(input: {
+export async function approveDeliverableForHire(input: {
   hireId: string;
   deliverableId: string;
   brandUserId: string;
   feedback?: string;
 }) {
-  const hire = getInstantHireRecordById(input.hireId);
+  const hire = await getInstantHireRecordById(input.hireId);
 
   if (!hire) {
     return { ok: false as const, error: "hire-not-found" as const };
@@ -1336,7 +1166,7 @@ export function approveDeliverableForHire(input: {
     return { ok: false as const, error: "invalid-hire-state" as const };
   }
 
-  const deliverable = getDeliverableRowById(input.deliverableId);
+  const deliverable = await getDeliverableRowById(input.deliverableId);
 
   if (!deliverable || deliverable.hire_id !== hire.id) {
     return { ok: false as const, error: "deliverable-not-found" as const };
@@ -1346,8 +1176,8 @@ export function approveDeliverableForHire(input: {
     return { ok: false as const, error: "invalid-hire-state" as const };
   }
 
-  const brandWallet = getWalletAccountRowById(hire.brandWalletId);
-  const creatorWallet = getWalletAccountRowById(hire.creatorWalletId);
+  const brandWallet = await getWalletAccountRowById(hire.brandWalletId);
+  const creatorWallet = await getWalletAccountRowById(hire.creatorWalletId);
 
   if (!brandWallet || !creatorWallet) {
     return { ok: false as const, error: "hire-not-found" as const };
@@ -1361,26 +1191,24 @@ export function approveDeliverableForHire(input: {
     return { ok: false as const, error: "invalid-hire-state" as const };
   }
 
-  const db = ensureInstantHireTables();
+  const db = await ensureInstantHireTables();
 
-  db.exec("BEGIN");
+  await db.transaction(async (transactionDatabase) => {
+    await transactionDatabase.prepare("UPDATE deliverables SET status = ?, review_feedback = ?, reviewed_at = ?, approved_at = ? WHERE id = ?").run(["approved", feedback ?? deliverable.review_feedback, approvedAt, approvedAt, deliverable.id]);
 
-  try {
-    db.prepare("UPDATE deliverables SET status = ?, review_feedback = ?, reviewed_at = ?, approved_at = ? WHERE id = ?").run("approved", feedback ?? deliverable.review_feedback, approvedAt, approvedAt, deliverable.id);
-
-    db.prepare(
+    await transactionDatabase.prepare(
       `UPDATE wallet_accounts
        SET held_balance = ?, updated_at = ?
        WHERE id = ?`
-    ).run(brandWallet.held_balance - agreedPriceValue, approvedAt, brandWallet.id);
+    ).run([brandWallet.held_balance - agreedPriceValue, approvedAt, brandWallet.id]);
 
-    db.prepare(
+    await transactionDatabase.prepare(
       `UPDATE wallet_accounts
        SET balance = ?, updated_at = ?
        WHERE id = ?`
-    ).run(creatorWallet.balance + agreedPriceValue, approvedAt, creatorWallet.id);
+    ).run([creatorWallet.balance + agreedPriceValue, approvedAt, creatorWallet.id]);
 
-    createWalletTransaction(db, {
+    await createWalletTransaction(transactionDatabase, {
       walletId: brandWallet.id,
       type: "escrow_release",
       amount: agreedPriceValue,
@@ -1391,7 +1219,7 @@ export function approveDeliverableForHire(input: {
       createdAt: approvedAt,
     });
 
-    createWalletTransaction(db, {
+    await createWalletTransaction(transactionDatabase, {
       walletId: creatorWallet.id,
       type: "payout",
       amount: agreedPriceValue,
@@ -1402,14 +1230,14 @@ export function approveDeliverableForHire(input: {
       createdAt: approvedAt,
     });
 
-    updateInstantHireState(db, {
+    await updateInstantHireState(transactionDatabase, {
       hireId: hire.id,
       status: "approved",
       escrowStatus: "released-local",
       updatedAt: approvedAt,
     });
 
-    appendConversationMessage(db, {
+    await appendConversationMessage(transactionDatabase, {
       conversationId: hire.conversationId,
       senderId: localSystemSenderId,
       content: `Deliverable ${deliverable.revision_number} approved and escrow released to the creator wallet.`,
@@ -1417,7 +1245,7 @@ export function approveDeliverableForHire(input: {
     });
 
     if (feedback) {
-      appendConversationMessage(db, {
+      await appendConversationMessage(transactionDatabase, {
         conversationId: hire.conversationId,
         senderId: input.brandUserId,
         content: feedback,
@@ -1425,7 +1253,7 @@ export function approveDeliverableForHire(input: {
       });
     }
 
-    createNotification(db, {
+    await createNotification(transactionDatabase, {
       userId: hire.brandUserId,
       type: "hire_approved",
       title: "Escrow released",
@@ -1435,7 +1263,7 @@ export function approveDeliverableForHire(input: {
     });
 
     if (hire.creatorAuthUserId) {
-      createNotification(db, {
+      await createNotification(transactionDatabase, {
         userId: hire.creatorAuthUserId,
         type: "hire_approved",
         title: "Deliverable approved",
@@ -1445,21 +1273,18 @@ export function approveDeliverableForHire(input: {
       });
     }
 
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  });
 
-  return { ok: true as const, hire: getInstantHireRecordById(hire.id), deliverable: getDeliverableRowById(deliverable.id) ? toDeliverableRecord(getDeliverableRowById(deliverable.id) as DeliverableRow) : undefined };
+  const nextDeliverable = await getDeliverableRowById(deliverable.id);
+  return { ok: true as const, hire: await getInstantHireRecordById(hire.id), deliverable: nextDeliverable ? toDeliverableRecord(nextDeliverable) : undefined };
 }
 
-export function refundInstantHire(input: {
+export async function refundInstantHire(input: {
   hireId: string;
   brandUserId: string;
   reason: string;
 }) {
-  const hire = getInstantHireRecordById(input.hireId);
+  const hire = await getInstantHireRecordById(input.hireId);
 
   if (!hire) {
     return { ok: false as const, error: "hire-not-found" as const };
@@ -1479,7 +1304,7 @@ export function refundInstantHire(input: {
     return { ok: false as const, error: "missing-feedback" as const };
   }
 
-  const brandWallet = getWalletAccountRowById(hire.brandWalletId);
+  const brandWallet = await getWalletAccountRowById(hire.brandWalletId);
 
   if (!brandWallet) {
     return { ok: false as const, error: "hire-not-found" as const };
@@ -1492,18 +1317,16 @@ export function refundInstantHire(input: {
     return { ok: false as const, error: "invalid-hire-state" as const };
   }
 
-  const db = ensureInstantHireTables();
+  const db = await ensureInstantHireTables();
 
-  db.exec("BEGIN");
-
-  try {
-    db.prepare(
+  await db.transaction(async (transactionDatabase) => {
+    await transactionDatabase.prepare(
       `UPDATE wallet_accounts
        SET balance = ?, held_balance = ?, updated_at = ?
        WHERE id = ?`
-    ).run(brandWallet.balance + agreedPriceValue, brandWallet.held_balance - agreedPriceValue, refundAt, brandWallet.id);
+    ).run([brandWallet.balance + agreedPriceValue, brandWallet.held_balance - agreedPriceValue, refundAt, brandWallet.id]);
 
-    createWalletTransaction(db, {
+    await createWalletTransaction(transactionDatabase, {
       walletId: brandWallet.id,
       type: "refund",
       amount: agreedPriceValue,
@@ -1514,28 +1337,28 @@ export function refundInstantHire(input: {
       createdAt: refundAt,
     });
 
-    updateInstantHireState(db, {
+    await updateInstantHireState(transactionDatabase, {
       hireId: hire.id,
       status: "cancelled",
       escrowStatus: "refunded-local",
       updatedAt: refundAt,
     });
 
-    appendConversationMessage(db, {
+    await appendConversationMessage(transactionDatabase, {
       conversationId: hire.conversationId,
       senderId: localSystemSenderId,
       content: `Hire cancelled and escrow refunded to the brand wallet for ${hire.packageTitle}.`,
       createdAt: refundAt,
     });
 
-    appendConversationMessage(db, {
+    await appendConversationMessage(transactionDatabase, {
       conversationId: hire.conversationId,
       senderId: input.brandUserId,
       content: reason,
       createdAt: new Date(Date.parse(refundAt) + 1).toISOString(),
     });
 
-    createNotification(db, {
+    await createNotification(transactionDatabase, {
       userId: hire.brandUserId,
       type: "hire_refunded",
       title: "Hire refunded",
@@ -1545,7 +1368,7 @@ export function refundInstantHire(input: {
     });
 
     if (hire.creatorAuthUserId) {
-      createNotification(db, {
+      await createNotification(transactionDatabase, {
         userId: hire.creatorAuthUserId,
         type: "hire_refunded",
         title: "Hire cancelled",
@@ -1555,22 +1378,18 @@ export function refundInstantHire(input: {
       });
     }
 
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  });
 
-  return { ok: true as const, hire: getInstantHireRecordById(hire.id) };
+  return { ok: true as const, hire: await getInstantHireRecordById(hire.id) };
 }
 
-export function createInstantHireRecord(input: {
+export async function createInstantHireRecord(input: {
   packageId: string;
   brandUserId: string;
   deliveryDeadline: string;
   brief: string;
 }) {
-  const packageSelection = getCreatorPackageByCheckoutId(input.packageId);
+  const packageSelection = await getCreatorPackageByCheckoutId(input.packageId);
 
   if (!packageSelection) {
     return { ok: false as const, error: "package-not-found" as const };
@@ -1582,78 +1401,76 @@ export function createInstantHireRecord(input: {
     return { ok: false as const, error: "package-not-found" as const };
   }
 
-  const db = ensureInstantHireTables();
+  const db = await ensureInstantHireTables();
   const createdAt = new Date().toISOString();
   const hireId = `hire_${randomUUID()}`;
   const conversationId = `conv_${randomUUID()}`;
   const trackingLink = `trk_${hireId}`;
   const creatorParticipantId = getCreatorParticipantId(packageSelection.creator.username, packageSelection.creator.authUserId ?? null);
 
-  db.exec("BEGIN");
-
   try {
-    const brandWallet = ensureWalletAccount(input.brandUserId, defaultBrandWalletBalance, "USD", createdAt);
-    const creatorWallet = ensureWalletAccount(creatorParticipantId, 0, "USD", createdAt);
+    await db.transaction(async (transactionDatabase) => {
+      const brandWallet = await ensureWalletAccount(transactionDatabase, input.brandUserId, defaultBrandWalletBalance, "USD", createdAt);
+      const creatorWallet = await ensureWalletAccount(transactionDatabase, creatorParticipantId, 0, "USD", createdAt);
 
-    if (brandWallet.balance < agreedPriceValue) {
-      db.exec("ROLLBACK");
-      return { ok: false as const, error: "insufficient-wallet-balance" as const };
-    }
+      if (brandWallet.balance < agreedPriceValue) {
+        throw new Error("insufficient-wallet-balance");
+      }
 
-    const escrowTransactionId = createWalletTransaction(db, {
-      walletId: brandWallet.id,
-      type: "escrow_hold",
-      amount: agreedPriceValue,
-      currency: "USD",
-      referenceType: "campaign_hire",
-      referenceId: hireId,
-      note: `Escrow hold for ${packageSelection.package.title}`,
-      createdAt,
-    });
+      const escrowTransactionId = await createWalletTransaction(transactionDatabase, {
+        walletId: brandWallet.id,
+        type: "escrow_hold",
+        amount: agreedPriceValue,
+        currency: "USD",
+        referenceType: "campaign_hire",
+        referenceId: hireId,
+        note: `Escrow hold for ${packageSelection.package.title}`,
+        createdAt,
+      });
 
-    db.prepare(
-      `UPDATE wallet_accounts
-       SET balance = ?, held_balance = ?, updated_at = ?
-       WHERE id = ?`
-    ).run(brandWallet.balance - agreedPriceValue, brandWallet.held_balance + agreedPriceValue, createdAt, brandWallet.id);
+      await transactionDatabase.prepare(
+        `UPDATE wallet_accounts
+         SET balance = ?, held_balance = ?, updated_at = ?
+         WHERE id = ?`
+      ).run([brandWallet.balance - agreedPriceValue, brandWallet.held_balance + agreedPriceValue, createdAt, brandWallet.id]);
 
-    db.prepare(
-      `INSERT INTO conversations (id, type, reference_id, participant_ids_json, last_message_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(conversationId, "hire", hireId, JSON.stringify([input.brandUserId, creatorParticipantId]), createdAt, createdAt);
+      await transactionDatabase.prepare(
+        `INSERT INTO conversations (id, type, reference_id, participant_ids_json, last_message_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run([conversationId, "hire", hireId, JSON.stringify([input.brandUserId, creatorParticipantId]), createdAt, createdAt]);
 
-    db.prepare(
-      `INSERT INTO messages (id, conversation_id, sender_id, content, media_urls_json, read_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      `msg_${randomUUID()}`,
-      conversationId,
-      localSystemSenderId,
-      `Instant hire created for ${packageSelection.creator.name} on package ${packageSelection.package.title}.`,
-      JSON.stringify([]),
-      createdAt,
-      createdAt,
-    );
+      await transactionDatabase.prepare(
+        `INSERT INTO messages (id, conversation_id, sender_id, content, media_urls_json, read_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).run([
+        `msg_${randomUUID()}`,
+        conversationId,
+        localSystemSenderId,
+        `Instant hire created for ${packageSelection.creator.name} on package ${packageSelection.package.title}.`,
+        JSON.stringify([]),
+        createdAt,
+        createdAt,
+      ]);
 
-    const briefMessageCreatedAt = new Date(Date.now() + 1).toISOString();
+      const briefMessageCreatedAt = new Date(Date.now() + 1).toISOString();
 
-    db.prepare(
-      `INSERT INTO messages (id, conversation_id, sender_id, content, media_urls_json, read_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      `msg_${randomUUID()}`,
-      conversationId,
-      input.brandUserId,
-      input.brief,
-      JSON.stringify([]),
-      null,
-      briefMessageCreatedAt,
-    );
+      await transactionDatabase.prepare(
+        `INSERT INTO messages (id, conversation_id, sender_id, content, media_urls_json, read_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).run([
+        `msg_${randomUUID()}`,
+        conversationId,
+        input.brandUserId,
+        input.brief,
+        JSON.stringify([]),
+        null,
+        briefMessageCreatedAt,
+      ]);
 
-    db.prepare("UPDATE conversations SET last_message_at = ? WHERE id = ?").run(briefMessageCreatedAt, conversationId);
+      await transactionDatabase.prepare("UPDATE conversations SET last_message_at = ? WHERE id = ?").run([briefMessageCreatedAt, conversationId]);
 
-    db.prepare(
-      `INSERT INTO instant_hires (
+      await transactionDatabase.prepare(
+        `INSERT INTO instant_hires (
         id,
         package_id,
         brand_user_id,
@@ -1700,62 +1517,59 @@ export function createInstantHireRecord(input: {
         :created_at,
         :updated_at
       )`
-    ).run({
-      id: hireId,
-      package_id: input.packageId,
-      brand_user_id: input.brandUserId,
-      creator_participant_id: creatorParticipantId,
-      creator_auth_user_id: packageSelection.creator.authUserId ?? null,
-      creator_username: packageSelection.creator.username,
-      creator_name: packageSelection.creator.name,
-      package_title: packageSelection.package.title,
-      package_price: packageSelection.package.price,
-      agreed_price: packageSelection.package.price,
-      delivery_deadline: input.deliveryDeadline,
-      brief: input.brief,
-      hire_type: "instant",
-      status: "accepted",
-      escrow_status: "held-local",
-      tracking_link: trackingLink,
-      conversation_id: conversationId,
-      brand_wallet_id: brandWallet.id,
-      creator_wallet_id: creatorWallet.id,
-      escrow_transaction_id: escrowTransactionId,
-      created_at: createdAt,
-      updated_at: createdAt,
-    });
+      ).run({
+        id: hireId,
+        package_id: input.packageId,
+        brand_user_id: input.brandUserId,
+        creator_participant_id: creatorParticipantId,
+        creator_auth_user_id: packageSelection.creator.authUserId ?? null,
+        creator_username: packageSelection.creator.username,
+        creator_name: packageSelection.creator.name,
+        package_title: packageSelection.package.title,
+        package_price: packageSelection.package.price,
+        agreed_price: packageSelection.package.price,
+        delivery_deadline: input.deliveryDeadline,
+        brief: input.brief,
+        hire_type: "instant",
+        status: "accepted",
+        escrow_status: "held-local",
+        tracking_link: trackingLink,
+        conversation_id: conversationId,
+        brand_wallet_id: brandWallet.id,
+        creator_wallet_id: creatorWallet.id,
+        escrow_transaction_id: escrowTransactionId,
+        created_at: createdAt,
+        updated_at: createdAt,
+      });
 
-    createNotification(db, {
-      userId: input.brandUserId,
-      type: "hire_created",
-      title: "Instant hire created",
-      body: `Your hire for ${packageSelection.package.title} is live and escrow is held.`,
-      link: `/dashboard/hires/${hireId}`,
-      createdAt,
-    });
-
-    if (packageSelection.creator.authUserId) {
-      createNotification(db, {
-        userId: packageSelection.creator.authUserId,
+      await createNotification(transactionDatabase, {
+        userId: input.brandUserId,
         type: "hire_created",
-        title: "New instant hire",
-        body: `A brand hired your ${packageSelection.package.title} package.`,
-        link: `/creator/hires/${hireId}`,
+        title: "Instant hire created",
+        body: `Your hire for ${packageSelection.package.title} is live and escrow is held.`,
+        link: `/dashboard/hires/${hireId}`,
         createdAt,
       });
-    }
 
-    db.exec("COMMIT");
-
-    const hire = getInstantHireRecordById(hireId);
-
-    if (!hire) {
-      return { ok: false as const, error: "package-not-found" as const };
-    }
-
-    return { ok: true as const, hire };
+      if (packageSelection.creator.authUserId) {
+        await createNotification(transactionDatabase, {
+          userId: packageSelection.creator.authUserId,
+          type: "hire_created",
+          title: "New instant hire",
+          body: `A brand hired your ${packageSelection.package.title} package.`,
+          link: `/creator/hires/${hireId}`,
+          createdAt,
+        });
+      }
+    });
   } catch (error) {
-    db.exec("ROLLBACK");
+    if (error instanceof Error && error.message === "insufficient-wallet-balance") {
+      return { ok: false as const, error: "insufficient-wallet-balance" as const };
+    }
+
     throw error;
   }
+
+  const hire = await getInstantHireRecordById(hireId);
+  return hire ? { ok: true as const, hire } : { ok: false as const, error: "package-not-found" as const };
 }

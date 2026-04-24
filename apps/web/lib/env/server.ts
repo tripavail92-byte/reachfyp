@@ -14,6 +14,9 @@ const serverEnv = {
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
   googleRedirectUri: process.env.GOOGLE_REDIRECT_URI ?? `${appUrl}/auth/google/callback`,
+  postmarkServerToken: process.env.POSTMARK_SERVER_TOKEN ?? "",
+  postmarkFromEmail: process.env.POSTMARK_FROM_EMAIL ?? "",
+  postmarkMessageStream: process.env.POSTMARK_MESSAGE_STREAM ?? "outbound",
 } as const;
 
 export function hasAppleAuthConfig() {
@@ -24,6 +27,10 @@ export function hasAppleAuthConfig() {
 
 export function hasGoogleAuthConfig() {
   return Boolean(serverEnv.googleClientId && serverEnv.googleClientSecret && serverEnv.googleRedirectUri);
+}
+
+export function hasPostmarkEmailConfig() {
+  return Boolean(serverEnv.postmarkServerToken && serverEnv.postmarkFromEmail);
 }
 
 export default serverEnv;

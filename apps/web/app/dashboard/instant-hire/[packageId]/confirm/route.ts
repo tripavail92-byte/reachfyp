@@ -36,7 +36,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pa
     return NextResponse.redirect(getRedirectUrl(request, packageId, { error: "invalid-deadline" }), 303);
   }
 
-  const result = createInstantHireRecord({
+  const result = await createInstantHireRecord({
     packageId,
     brandUserId: currentUser.id,
     deliveryDeadline,

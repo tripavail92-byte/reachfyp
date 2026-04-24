@@ -53,9 +53,9 @@ export default async function CreatorProfileEditorPage({ searchParams }: Creator
   }
 
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const creatorProfile = getCreatorRecordByAuthUserId(currentUser.id);
+  const creatorProfile = await getCreatorRecordByAuthUserId(currentUser.id);
   if (creatorProfile && currentUser.reservedCreatorUsername) {
-    clearReservedCreatorUsername(currentUser.id);
+    await clearReservedCreatorUsername(currentUser.id);
   }
   const claimedUsername = normalizeCreatorUsername(String(resolvedSearchParams?.claimedUsername ?? ""));
   const feedbackMessage =
@@ -68,7 +68,7 @@ export default async function CreatorProfileEditorPage({ searchParams }: Creator
   return (
     <main className="app-shell">
       <div className="shell-container">
-        <MarketplaceTopNav activeHref="/auth" />
+        <MarketplaceTopNav activeHref="/creator/profile" />
 
         <GlassPanel className="hero-card">
           <div className="hero-card__header">

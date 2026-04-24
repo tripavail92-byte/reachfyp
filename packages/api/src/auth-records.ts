@@ -1,5 +1,7 @@
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import { getReachfypDatabase } from "./creator-database";
+import { listTableColumns } from "./database-client";
+import { ensureReachfypBaseSchema } from "./database-schema";
 
 export type AuthUserRole = "brand" | "creator" | "admin";
 
@@ -68,82 +70,31 @@ type CreateGoogleAuthUserInput = {
   reservedCreatorUsername?: string | null;
 };
 
-function getAuthDatabase() {
-  const database = getReachfypDatabase();
+async function getAuthDatabase() {
+  const database = await getReachfypDatabase();
+  await ensureReachfypBaseSchema(database);
 
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS auth_users (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      company_name TEXT,
-      email TEXT NOT NULL UNIQUE,
-      email_verified_at TEXT,
-      password_hash TEXT NOT NULL,
-      role TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    )
-  `);
-
-  const authUserColumns = database.prepare("PRAGMA table_info(auth_users)").all() as Array<{ name: string }>;
+  const authUserColumns = await listTableColumns(database, "auth_users");
 
   if (!authUserColumns.some((column) => column.name === "company_name")) {
-    database.exec("ALTER TABLE auth_users ADD COLUMN company_name TEXT");
+    await database.exec("ALTER TABLE auth_users ADD COLUMN company_name TEXT");
   }
 
   if (!authUserColumns.some((column) => column.name === "reserved_creator_username")) {
-    database.exec("ALTER TABLE auth_users ADD COLUMN reserved_creator_username TEXT");
+    await database.exec("ALTER TABLE auth_users ADD COLUMN reserved_creator_username TEXT");
   }
 
   if (!authUserColumns.some((column) => column.name === "apple_subject")) {
-    database.exec("ALTER TABLE auth_users ADD COLUMN apple_subject TEXT");
+    await database.exec("ALTER TABLE auth_users ADD COLUMN apple_subject TEXT");
   }
 
   if (!authUserColumns.some((column) => column.name === "google_subject")) {
-    database.exec("ALTER TABLE auth_users ADD COLUMN google_subject TEXT");
+    await database.exec("ALTER TABLE auth_users ADD COLUMN google_subject TEXT");
   }
 
   if (!authUserColumns.some((column) => column.name === "email_verified_at")) {
-    database.exec("ALTER TABLE auth_users ADD COLUMN email_verified_at TEXT");
+    await database.exec("ALTER TABLE auth_users ADD COLUMN email_verified_at TEXT");
   }
-
-  database.exec("CREATE UNIQUE INDEX IF NOT EXISTS auth_users_reserved_creator_username_idx ON auth_users(reserved_creator_username)");
-  database.exec("CREATE UNIQUE INDEX IF NOT EXISTS auth_users_apple_subject_idx ON auth_users(apple_subject)");
-  database.exec("CREATE UNIQUE INDEX IF NOT EXISTS auth_users_google_subject_idx ON auth_users(google_subject)");
-
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS auth_sessions (
-      token_hash TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      expires_at TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES auth_users(id) ON DELETE CASCADE
-    )
-  `);
-
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS auth_password_reset_tokens (
-      token_hash TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      expires_at TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      used_at TEXT,
-      FOREIGN KEY (user_id) REFERENCES auth_users(id) ON DELETE CASCADE
-    )
-  `);
-
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS auth_email_verification_tokens (
-      token_hash TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      expires_at TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      used_at TEXT,
-      FOREIGN KEY (user_id) REFERENCES auth_users(id) ON DELETE CASCADE
-    )
-  `);
-
-  database.exec("CREATE INDEX IF NOT EXISTS auth_password_reset_tokens_user_id_idx ON auth_password_reset_tokens(user_id)");
-  database.exec("CREATE INDEX IF NOT EXISTS auth_email_verification_tokens_user_id_idx ON auth_email_verification_tokens(user_id)");
 
   return database;
 }
@@ -201,76 +152,77 @@ function hashOpaqueToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
 
-function clearExpiredSessions() {
-  getAuthDatabase().prepare("DELETE FROM auth_sessions WHERE expires_at <= ?").run(new Date().toISOString());
+async function clearExpiredSessions() {
+  await (await getAuthDatabase()).prepare("DELETE FROM auth_sessions WHERE expires_at <= ?").run([new Date().toISOString()]);
 }
 
-function clearExpiredOneTimeTokens() {
+async function clearExpiredOneTimeTokens() {
   const now = new Date().toISOString();
-  getAuthDatabase().prepare("DELETE FROM auth_password_reset_tokens WHERE expires_at <= ?").run(now);
-  getAuthDatabase().prepare("DELETE FROM auth_email_verification_tokens WHERE expires_at <= ?").run(now);
+  const database = await getAuthDatabase();
+  await database.prepare("DELETE FROM auth_password_reset_tokens WHERE expires_at <= ?").run([now]);
+  await database.prepare("DELETE FROM auth_email_verification_tokens WHERE expires_at <= ?").run([now]);
 }
 
-function getUserRowByEmail(email: string) {
-  return getAuthDatabase()
+async function getUserRowByEmail(email: string) {
+  return (await getAuthDatabase())
     .prepare("SELECT * FROM auth_users WHERE email = ?")
-    .get(normalizeEmail(email)) as AuthUserRow | undefined;
+    .get<AuthUserRow>([normalizeEmail(email)]);
 }
 
-function getUserRowByAppleSubject(appleSubject: string) {
-  return getAuthDatabase().prepare("SELECT * FROM auth_users WHERE apple_subject = ?").get(appleSubject) as AuthUserRow | undefined;
+async function getUserRowByAppleSubject(appleSubject: string) {
+  return (await getAuthDatabase()).prepare("SELECT * FROM auth_users WHERE apple_subject = ?").get<AuthUserRow>([appleSubject]);
 }
 
-function getUserRowByGoogleSubject(googleSubject: string) {
-  return getAuthDatabase().prepare("SELECT * FROM auth_users WHERE google_subject = ?").get(googleSubject) as AuthUserRow | undefined;
+async function getUserRowByGoogleSubject(googleSubject: string) {
+  return (await getAuthDatabase()).prepare("SELECT * FROM auth_users WHERE google_subject = ?").get<AuthUserRow>([googleSubject]);
 }
 
-function getUserRowByReservedCreatorUsername(username: string) {
-  return getAuthDatabase()
+async function getUserRowByReservedCreatorUsername(username: string) {
+  return (await getAuthDatabase())
     .prepare("SELECT * FROM auth_users WHERE reserved_creator_username = ?")
-    .get(username) as AuthUserRow | undefined;
+    .get<AuthUserRow>([username]);
 }
 
-function getUserRowById(userId: string) {
-  return getAuthDatabase().prepare("SELECT * FROM auth_users WHERE id = ?").get(userId) as AuthUserRow | undefined;
+async function getUserRowById(userId: string) {
+  return (await getAuthDatabase()).prepare("SELECT * FROM auth_users WHERE id = ?").get<AuthUserRow>([userId]);
 }
 
-function deleteSessionsForUser(userId: string) {
-  getAuthDatabase().prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
+async function deleteSessionsForUser(userId: string) {
+  await (await getAuthDatabase()).prepare("DELETE FROM auth_sessions WHERE user_id = ?").run([userId]);
 }
 
-function invalidatePasswordResetTokensForUser(userId: string) {
-  getAuthDatabase().prepare("DELETE FROM auth_password_reset_tokens WHERE user_id = ?").run(userId);
+async function invalidatePasswordResetTokensForUser(userId: string) {
+  await (await getAuthDatabase()).prepare("DELETE FROM auth_password_reset_tokens WHERE user_id = ?").run([userId]);
 }
 
-function invalidateEmailVerificationTokensForUser(userId: string) {
-  getAuthDatabase().prepare("DELETE FROM auth_email_verification_tokens WHERE user_id = ?").run(userId);
+async function invalidateEmailVerificationTokensForUser(userId: string) {
+  await (await getAuthDatabase()).prepare("DELETE FROM auth_email_verification_tokens WHERE user_id = ?").run([userId]);
 }
 
-function issueOneTimeToken(tableName: "auth_password_reset_tokens" | "auth_email_verification_tokens", userId: string, ttlMs: number) {
-  clearExpiredOneTimeTokens();
+async function issueOneTimeToken(tableName: "auth_password_reset_tokens" | "auth_email_verification_tokens", userId: string, ttlMs: number) {
+  await clearExpiredOneTimeTokens();
 
   const token = randomBytes(32).toString("hex");
   const tokenHash = hashOpaqueToken(token);
   const now = new Date();
   const expiresAt = new Date(now.getTime() + ttlMs).toISOString();
 
-  getAuthDatabase()
+  await (await getAuthDatabase())
     .prepare(
       `INSERT INTO ${tableName} (token_hash, user_id, expires_at, created_at, used_at)
        VALUES (?, ?, ?, ?, NULL)`
     )
-    .run(tokenHash, userId, expiresAt, now.toISOString());
+    .run([tokenHash, userId, expiresAt, now.toISOString()]);
 
   return token;
 }
 
-function getValidOneTimeTokenRow(tableName: "auth_password_reset_tokens" | "auth_email_verification_tokens", token: string) {
-  clearExpiredOneTimeTokens();
+async function getValidOneTimeTokenRow(tableName: "auth_password_reset_tokens" | "auth_email_verification_tokens", token: string) {
+  await clearExpiredOneTimeTokens();
 
-  const row = getAuthDatabase()
+  const row = await (await getAuthDatabase())
     .prepare(`SELECT user_id, expires_at, used_at FROM ${tableName} WHERE token_hash = ?`)
-    .get(hashOpaqueToken(token)) as AuthOneTimeTokenRow | undefined;
+    .get<AuthOneTimeTokenRow>([hashOpaqueToken(token)]);
 
   if (!row || row.used_at || row.expires_at <= new Date().toISOString()) {
     return null;
@@ -279,13 +231,13 @@ function getValidOneTimeTokenRow(tableName: "auth_password_reset_tokens" | "auth
   return row;
 }
 
-function markOneTimeTokenUsed(tableName: "auth_password_reset_tokens" | "auth_email_verification_tokens", token: string) {
-  getAuthDatabase()
+async function markOneTimeTokenUsed(tableName: "auth_password_reset_tokens" | "auth_email_verification_tokens", token: string) {
+  await (await getAuthDatabase())
     .prepare(`UPDATE ${tableName} SET used_at = ? WHERE token_hash = ?`)
-    .run(new Date().toISOString(), hashOpaqueToken(token));
+    .run([new Date().toISOString(), hashOpaqueToken(token)]);
 }
 
-function validateReservedCreatorUsername(rawUsername: string | null | undefined, userId?: string) {
+async function validateReservedCreatorUsername(rawUsername: string | null | undefined, userId?: string) {
   const username = normalizeCreatorUsername(rawUsername ?? "");
 
   if (!rawUsername) {
@@ -296,15 +248,15 @@ function validateReservedCreatorUsername(rawUsername: string | null | undefined,
     return { ok: false as const, error: "invalid-username" as const };
   }
 
-  const creatorRow = getReachfypDatabase()
+  const creatorRow = await (await getReachfypDatabase())
     .prepare("SELECT auth_user_id FROM creators WHERE username = ? LIMIT 1")
-    .get(username) as { auth_user_id: string | null } | undefined;
+    .get<{ auth_user_id: string | null }>([username]);
 
   if (creatorRow && creatorRow.auth_user_id !== userId) {
     return { ok: false as const, error: "creator-username-unavailable" as const };
   }
 
-  const reservedBy = getUserRowByReservedCreatorUsername(username);
+  const reservedBy = await getUserRowByReservedCreatorUsername(username);
 
   if (reservedBy && reservedBy.id !== userId) {
     return { ok: false as const, error: "creator-username-unavailable" as const };
@@ -313,7 +265,7 @@ function validateReservedCreatorUsername(rawUsername: string | null | undefined,
   return { ok: true as const, username };
 }
 
-function createStoredAuthUser(input: {
+async function createStoredAuthUser(input: {
   name: string;
   companyName?: string | null;
   reservedCreatorUsername?: string | null;
@@ -327,12 +279,12 @@ function createStoredAuthUser(input: {
   const now = new Date().toISOString();
   const userId = randomUUID();
 
-  getAuthDatabase()
+  await (await getAuthDatabase())
     .prepare(
       `INSERT INTO auth_users (id, name, company_name, reserved_creator_username, apple_subject, google_subject, email, email_verified_at, password_hash, role, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(
+    .run([
       userId,
       input.name,
       input.companyName ?? null,
@@ -344,27 +296,27 @@ function createStoredAuthUser(input: {
       input.passwordHash,
       input.role,
       now,
-    );
+    ]);
 
   return getUserRowById(userId);
 }
 
-export function listAuthUsersByRole(role: AuthUserRole) {
-  return (getAuthDatabase().prepare("SELECT * FROM auth_users WHERE role = ? ORDER BY created_at ASC").all(role) as AuthUserRow[]).map(toAuthUser);
+export async function listAuthUsersByRole(role: AuthUserRole) {
+  return (await (await getAuthDatabase()).prepare("SELECT * FROM auth_users WHERE role = ? ORDER BY created_at ASC").all<AuthUserRow>([role])).map(toAuthUser);
 }
 
-export function listReservedCreatorUsernames() {
-  return (getAuthDatabase()
+export async function listReservedCreatorUsernames() {
+  return (await (await getAuthDatabase())
     .prepare("SELECT reserved_creator_username FROM auth_users WHERE reserved_creator_username IS NOT NULL ORDER BY reserved_creator_username ASC")
-    .all() as Array<{ reserved_creator_username: string }>).map((row) => row.reserved_creator_username);
+    .all<{ reserved_creator_username: string }>()).map((row) => row.reserved_creator_username);
 }
 
-export function registerAuthUser(input: RegisterAuthUserInput) {
+export async function registerAuthUser(input: RegisterAuthUserInput) {
   const name = input.name.trim();
   const companyName = input.companyName?.trim() || null;
   const email = normalizeEmail(input.email);
   const password = input.password;
-  const reservedUsernameCheck = input.role === "creator" ? validateReservedCreatorUsername(input.reservedCreatorUsername) : { ok: true as const, username: null };
+  const reservedUsernameCheck = input.role === "creator" ? await validateReservedCreatorUsername(input.reservedCreatorUsername) : { ok: true as const, username: null };
 
   if (name.length < 2) {
     return { ok: false as const, error: "name-too-short" as const };
@@ -382,11 +334,11 @@ export function registerAuthUser(input: RegisterAuthUserInput) {
     return { ok: false as const, error: "password-too-short" as const };
   }
 
-  if (getUserRowByEmail(email)) {
+  if (await getUserRowByEmail(email)) {
     return { ok: false as const, error: "email-in-use" as const };
   }
 
-  const createdUser = createStoredAuthUser({
+  const createdUser = await createStoredAuthUser({
     name,
     companyName,
     reservedCreatorUsername: reservedUsernameCheck.username,
@@ -402,50 +354,50 @@ export function registerAuthUser(input: RegisterAuthUserInput) {
   return { ok: true as const, user: toAuthUser(createdUser) };
 }
 
-export function createPasswordResetRequest(email: string) {
-  const user = getUserRowByEmail(email);
+export async function createPasswordResetRequest(email: string) {
+  const user = await getUserRowByEmail(email);
 
   if (!user) {
     return { ok: true as const, issued: false as const, token: null };
   }
 
-  invalidatePasswordResetTokensForUser(user.id);
+  await invalidatePasswordResetTokensForUser(user.id);
 
   return {
     ok: true as const,
     issued: true as const,
-    token: issueOneTimeToken("auth_password_reset_tokens", user.id, 1000 * 60 * 30),
+    token: await issueOneTimeToken("auth_password_reset_tokens", user.id, 1000 * 60 * 30),
   };
 }
 
-export function resetPasswordWithToken(token: string, password: string) {
+export async function resetPasswordWithToken(token: string, password: string) {
   if (password.length < 8) {
     return { ok: false as const, error: "password-too-short" as const };
   }
 
-  const tokenRow = getValidOneTimeTokenRow("auth_password_reset_tokens", token);
+  const tokenRow = await getValidOneTimeTokenRow("auth_password_reset_tokens", token);
 
   if (!tokenRow) {
     return { ok: false as const, error: "invalid-reset-token" as const };
   }
 
-  const user = getUserRowById(tokenRow.user_id);
+  const user = await getUserRowById(tokenRow.user_id);
 
   if (!user) {
     return { ok: false as const, error: "invalid-reset-token" as const };
   }
 
-  getAuthDatabase().prepare("UPDATE auth_users SET password_hash = ? WHERE id = ?").run(hashPassword(password), user.id);
-  markOneTimeTokenUsed("auth_password_reset_tokens", token);
-  invalidatePasswordResetTokensForUser(user.id);
-  deleteSessionsForUser(user.id);
+  await (await getAuthDatabase()).prepare("UPDATE auth_users SET password_hash = ? WHERE id = ?").run([hashPassword(password), user.id]);
+  await markOneTimeTokenUsed("auth_password_reset_tokens", token);
+  await invalidatePasswordResetTokensForUser(user.id);
+  await deleteSessionsForUser(user.id);
 
-  const nextUser = getUserRowById(user.id);
+  const nextUser = await getUserRowById(user.id);
   return nextUser ? { ok: true as const, user: toAuthUser(nextUser) } : { ok: false as const, error: "invalid-reset-token" as const };
 }
 
-export function createEmailVerificationRequestForUser(userId: string) {
-  const user = getUserRowById(userId);
+export async function createEmailVerificationRequestForUser(userId: string) {
+  const user = await getUserRowById(userId);
 
   if (!user) {
     return { ok: false as const, error: "invalid-user" as const };
@@ -455,42 +407,42 @@ export function createEmailVerificationRequestForUser(userId: string) {
     return { ok: true as const, issued: false as const, alreadyVerified: true as const, token: null };
   }
 
-  invalidateEmailVerificationTokensForUser(user.id);
+  await invalidateEmailVerificationTokensForUser(user.id);
 
   return {
     ok: true as const,
     issued: true as const,
     alreadyVerified: false as const,
-    token: issueOneTimeToken("auth_email_verification_tokens", user.id, 1000 * 60 * 60 * 24),
+    token: await issueOneTimeToken("auth_email_verification_tokens", user.id, 1000 * 60 * 60 * 24),
   };
 }
 
-export function verifyEmailWithToken(token: string) {
-  const tokenRow = getValidOneTimeTokenRow("auth_email_verification_tokens", token);
+export async function verifyEmailWithToken(token: string) {
+  const tokenRow = await getValidOneTimeTokenRow("auth_email_verification_tokens", token);
 
   if (!tokenRow) {
     return { ok: false as const, error: "invalid-verification-token" as const };
   }
 
-  const user = getUserRowById(tokenRow.user_id);
+  const user = await getUserRowById(tokenRow.user_id);
 
   if (!user) {
     return { ok: false as const, error: "invalid-verification-token" as const };
   }
 
-  getAuthDatabase().prepare("UPDATE auth_users SET email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?").run(new Date().toISOString(), user.id);
-  markOneTimeTokenUsed("auth_email_verification_tokens", token);
-  invalidateEmailVerificationTokensForUser(user.id);
+  await (await getAuthDatabase()).prepare("UPDATE auth_users SET email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?").run([new Date().toISOString(), user.id]);
+  await markOneTimeTokenUsed("auth_email_verification_tokens", token);
+  await invalidateEmailVerificationTokensForUser(user.id);
 
-  const nextUser = getUserRowById(user.id);
+  const nextUser = await getUserRowById(user.id);
   return nextUser ? { ok: true as const, user: toAuthUser(nextUser) } : { ok: false as const, error: "invalid-verification-token" as const };
 }
 
-export function upsertAppleAuthUser(input: CreateAppleAuthUserInput) {
+export async function upsertAppleAuthUser(input: CreateAppleAuthUserInput) {
   const appleSubject = input.appleSubject.trim();
   const email = normalizeEmail(input.email);
   const verifiedAt = new Date().toISOString();
-  const reservedUsernameCheck = input.role === "creator" ? validateReservedCreatorUsername(input.reservedCreatorUsername) : { ok: true as const, username: null };
+  const reservedUsernameCheck = input.role === "creator" ? await validateReservedCreatorUsername(input.reservedCreatorUsername) : { ok: true as const, username: null };
 
   if (!appleSubject || !email.includes("@")) {
     return { ok: false as const, error: "invalid-credentials" as const };
@@ -500,7 +452,7 @@ export function upsertAppleAuthUser(input: CreateAppleAuthUserInput) {
     return reservedUsernameCheck;
   }
 
-  const existingByApple = getUserRowByAppleSubject(appleSubject);
+  const existingByApple = await getUserRowByAppleSubject(appleSubject);
 
   if (existingByApple) {
     if (existingByApple.role !== input.role) {
@@ -508,33 +460,33 @@ export function upsertAppleAuthUser(input: CreateAppleAuthUserInput) {
     }
 
     if (reservedUsernameCheck.username && existingByApple.reserved_creator_username !== reservedUsernameCheck.username) {
-      getAuthDatabase()
+      await (await getAuthDatabase())
         .prepare("UPDATE auth_users SET reserved_creator_username = ?, email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?")
-        .run(reservedUsernameCheck.username, verifiedAt, existingByApple.id);
+        .run([reservedUsernameCheck.username, verifiedAt, existingByApple.id]);
     } else {
-      getAuthDatabase().prepare("UPDATE auth_users SET email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?").run(verifiedAt, existingByApple.id);
+      await (await getAuthDatabase()).prepare("UPDATE auth_users SET email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?").run([verifiedAt, existingByApple.id]);
     }
 
-    const nextUser = getUserRowById(existingByApple.id);
+    const nextUser = await getUserRowById(existingByApple.id);
     return nextUser ? { ok: true as const, user: toAuthUser(nextUser), created: false as const } : { ok: false as const, error: "registration-failed" as const };
   }
 
-  const existingByEmail = getUserRowByEmail(email);
+  const existingByEmail = await getUserRowByEmail(email);
 
   if (existingByEmail) {
     if (existingByEmail.role !== input.role) {
       return { ok: false as const, error: "provider-role-mismatch" as const };
     }
 
-    getAuthDatabase()
+    await (await getAuthDatabase())
       .prepare("UPDATE auth_users SET apple_subject = ?, reserved_creator_username = COALESCE(?, reserved_creator_username), email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?")
-      .run(appleSubject, reservedUsernameCheck.username, verifiedAt, existingByEmail.id);
+      .run([appleSubject, reservedUsernameCheck.username, verifiedAt, existingByEmail.id]);
 
-    const nextUser = getUserRowById(existingByEmail.id);
+    const nextUser = await getUserRowById(existingByEmail.id);
     return nextUser ? { ok: true as const, user: toAuthUser(nextUser), created: false as const } : { ok: false as const, error: "registration-failed" as const };
   }
 
-  const createdUser = createStoredAuthUser({
+  const createdUser = await createStoredAuthUser({
     name: input.name.trim() || email.split("@")[0] || "Apple user",
     companyName: input.companyName?.trim() || null,
     reservedCreatorUsername: reservedUsernameCheck.username,
@@ -552,11 +504,11 @@ export function upsertAppleAuthUser(input: CreateAppleAuthUserInput) {
   return { ok: true as const, user: toAuthUser(createdUser), created: true as const };
 }
 
-export function upsertGoogleAuthUser(input: CreateGoogleAuthUserInput) {
+export async function upsertGoogleAuthUser(input: CreateGoogleAuthUserInput) {
   const googleSubject = input.googleSubject.trim();
   const email = normalizeEmail(input.email);
   const verifiedAt = new Date().toISOString();
-  const reservedUsernameCheck = input.role === "creator" ? validateReservedCreatorUsername(input.reservedCreatorUsername) : { ok: true as const, username: null };
+  const reservedUsernameCheck = input.role === "creator" ? await validateReservedCreatorUsername(input.reservedCreatorUsername) : { ok: true as const, username: null };
 
   if (!googleSubject || !email.includes("@")) {
     return { ok: false as const, error: "invalid-credentials" as const };
@@ -566,7 +518,7 @@ export function upsertGoogleAuthUser(input: CreateGoogleAuthUserInput) {
     return reservedUsernameCheck;
   }
 
-  const existingByGoogle = getUserRowByGoogleSubject(googleSubject);
+  const existingByGoogle = await getUserRowByGoogleSubject(googleSubject);
 
   if (existingByGoogle) {
     if (existingByGoogle.role !== input.role) {
@@ -574,33 +526,33 @@ export function upsertGoogleAuthUser(input: CreateGoogleAuthUserInput) {
     }
 
     if (reservedUsernameCheck.username && existingByGoogle.reserved_creator_username !== reservedUsernameCheck.username) {
-      getAuthDatabase()
+      await (await getAuthDatabase())
         .prepare("UPDATE auth_users SET reserved_creator_username = ?, email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?")
-        .run(reservedUsernameCheck.username, verifiedAt, existingByGoogle.id);
+        .run([reservedUsernameCheck.username, verifiedAt, existingByGoogle.id]);
     } else {
-      getAuthDatabase().prepare("UPDATE auth_users SET email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?").run(verifiedAt, existingByGoogle.id);
+      await (await getAuthDatabase()).prepare("UPDATE auth_users SET email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?").run([verifiedAt, existingByGoogle.id]);
     }
 
-    const nextUser = getUserRowById(existingByGoogle.id);
+    const nextUser = await getUserRowById(existingByGoogle.id);
     return nextUser ? { ok: true as const, user: toAuthUser(nextUser), created: false as const } : { ok: false as const, error: "registration-failed" as const };
   }
 
-  const existingByEmail = getUserRowByEmail(email);
+  const existingByEmail = await getUserRowByEmail(email);
 
   if (existingByEmail) {
     if (existingByEmail.role !== input.role) {
       return { ok: false as const, error: "provider-role-mismatch" as const };
     }
 
-    getAuthDatabase()
+    await (await getAuthDatabase())
       .prepare("UPDATE auth_users SET google_subject = ?, reserved_creator_username = COALESCE(?, reserved_creator_username), email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?")
-      .run(googleSubject, reservedUsernameCheck.username, verifiedAt, existingByEmail.id);
+      .run([googleSubject, reservedUsernameCheck.username, verifiedAt, existingByEmail.id]);
 
-    const nextUser = getUserRowById(existingByEmail.id);
+    const nextUser = await getUserRowById(existingByEmail.id);
     return nextUser ? { ok: true as const, user: toAuthUser(nextUser), created: false as const } : { ok: false as const, error: "registration-failed" as const };
   }
 
-  const createdUser = createStoredAuthUser({
+  const createdUser = await createStoredAuthUser({
     name: input.name.trim() || email.split("@")[0] || "Google user",
     companyName: input.companyName?.trim() || null,
     reservedCreatorUsername: reservedUsernameCheck.username,
@@ -618,12 +570,12 @@ export function upsertGoogleAuthUser(input: CreateGoogleAuthUserInput) {
   return { ok: true as const, user: toAuthUser(createdUser), created: true as const };
 }
 
-export function clearReservedCreatorUsername(userId: string) {
-  getAuthDatabase().prepare("UPDATE auth_users SET reserved_creator_username = NULL WHERE id = ?").run(userId);
+export async function clearReservedCreatorUsername(userId: string) {
+  await (await getAuthDatabase()).prepare("UPDATE auth_users SET reserved_creator_username = NULL WHERE id = ?").run([userId]);
 }
 
-export function authenticateAuthUser(email: string, password: string) {
-  const user = getUserRowByEmail(email);
+export async function authenticateAuthUser(email: string, password: string) {
+  const user = await getUserRowByEmail(email);
 
   if (!user || !verifyPassword(password, user.password_hash)) {
     return null;
@@ -632,43 +584,43 @@ export function authenticateAuthUser(email: string, password: string) {
   return toAuthUser(user);
 }
 
-export function createAuthSession(userId: string) {
-  clearExpiredSessions();
+export async function createAuthSession(userId: string) {
+  await clearExpiredSessions();
 
   const sessionToken = randomBytes(32).toString("hex");
   const tokenHash = hashSessionToken(sessionToken);
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 1000 * 60 * 60 * 24 * 7).toISOString();
 
-  getAuthDatabase()
+  await (await getAuthDatabase())
     .prepare(
       `INSERT INTO auth_sessions (token_hash, user_id, expires_at, created_at)
        VALUES (?, ?, ?, ?)`
     )
-    .run(tokenHash, userId, expiresAt, now.toISOString());
+    .run([tokenHash, userId, expiresAt, now.toISOString()]);
 
   return sessionToken;
 }
 
-export function getAuthUserBySessionToken(sessionToken: string) {
-  clearExpiredSessions();
+export async function getAuthUserBySessionToken(sessionToken: string) {
+  await clearExpiredSessions();
 
-  const session = getAuthDatabase()
+  const session = await (await getAuthDatabase())
     .prepare("SELECT user_id, expires_at FROM auth_sessions WHERE token_hash = ?")
-    .get(hashSessionToken(sessionToken)) as AuthSessionRow | undefined;
+    .get<AuthSessionRow>([hashSessionToken(sessionToken)]);
 
   if (!session || session.expires_at <= new Date().toISOString()) {
     return null;
   }
 
-  const user = getUserRowById(session.user_id);
+  const user = await getUserRowById(session.user_id);
   return user ? toAuthUser(user) : null;
 }
 
-export function deleteAuthSession(sessionToken: string) {
-  getAuthDatabase().prepare("DELETE FROM auth_sessions WHERE token_hash = ?").run(hashSessionToken(sessionToken));
+export async function deleteAuthSession(sessionToken: string) {
+  await (await getAuthDatabase()).prepare("DELETE FROM auth_sessions WHERE token_hash = ?").run([hashSessionToken(sessionToken)]);
 }
 
-export function deleteAuthSessionsForUser(userId: string) {
-  deleteSessionsForUser(userId);
+export async function deleteAuthSessionsForUser(userId: string) {
+  await deleteSessionsForUser(userId);
 }

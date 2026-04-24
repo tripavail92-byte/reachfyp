@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
     }
 
     const rawUserPayload = parseAppleUserPayload(typeof formData.get("user") === "string" ? String(formData.get("user")) : null);
-    const upsertResult = upsertAppleAuthUser({
+    const upsertResult = await upsertAppleAuthUser({
       appleSubject,
       email,
       name: getAppleDisplayName(context.flow, email, rawUserPayload),
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
 
     const response = NextResponse.redirect(new URL(context.redirectTo, request.url), 303);
     clearAppleAuthContext(response);
-    return attachSessionCookie(response, upsertResult.user.id);
+    return await attachSessionCookie(response, upsertResult.user.id);
   } catch {
     return clearAppleAuthContext(NextResponse.redirect(getFailureUrl(request, context.flow, failureParams("apple-auth-failed")), 303));
   }

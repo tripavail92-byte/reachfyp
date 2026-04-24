@@ -220,8 +220,10 @@ Current shipped auth storage details:
 
 ## Planned Evolution
 
-These are valid future directions, but they are not active system dependencies today:
-- hosted Postgres or Supabase migration
-- production-grade payment processor integration
-- background job framework for scheduled recalculation and email delivery
-- expanded social OAuth beyond the current local creator social connection scaffolding
+These are the approved next infrastructure steps for Milestone 5 and later phases. They are not active runtime dependencies in the repo yet:
+- migrate the shared SQLite foundation to managed Postgres while keeping `packages/api` as the only persistence boundary
+- keep password reset and email verification mail app-owned, but send them through a Postmark-backed mailer adapter in staging and production
+- keep hashed database-backed sessions instead of JWTs, with a host-only secure production cookie and server-owned rotation rules
+- add production-grade payment processor integration when real escrow replaces the local wallet placeholder flow
+- add background job infrastructure only when retry needs, scheduled email work, or higher operational volume justify it
+- expand social OAuth beyond the current local creator social connection scaffolding
