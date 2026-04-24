@@ -1,0 +1,16 @@
+{
+  "name": "@reachfyp/api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@reachfyp/schemas": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json --noEmit",
+    "lint": "tsc --project tsconfig.json --noEmit",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  }
+}

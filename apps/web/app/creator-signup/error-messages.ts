@@ -1,0 +1,15 @@
+export const creatorSignupErrorMessages: Record<string, string> = {
+  "apple-auth-failed": "Apple sign up could not be completed. Please try again.",
+  "apple-config-missing": "Apple sign in is not configured yet for this environment.",
+  "creator-username-unavailable": "That username was reserved while you were signing up. Choose another handle.",
+  "email-in-use": "An account with that email already exists.",
+  "google-auth-failed": "Google sign up could not be completed. Please try again.",
+  "google-config-missing": "Google sign in is not configured yet for this environment.",
+  "invalid-state": "Your Apple sign in session expired. Please try again.",
+  "invalid-email": "Enter a valid email address.",
+  "invalid-username": "Use letters, numbers, and hyphens for the handle.",
+  "name-too-short": "Enter your full name.",
+  "password-too-short": "Password must be at least 8 characters.",
+  "provider-role-mismatch": "That Apple account is already attached to a different role.",
+  "registration-failed": "Could not create the account. Please try again.",
+};
