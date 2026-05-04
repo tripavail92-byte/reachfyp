@@ -25,6 +25,33 @@ Reachfyp is a web-first creator marketplace focused on authenticity scoring, per
 - `pnpm lint`
 - `pnpm typecheck`
 
+## Railway Deploy
+
+- Railway can deploy this repo directly from GitHub as a monorepo.
+- The repo now includes [railway.json](d:/marketingsales/railway.json) so Railway builds from the workspace root and starts the Next app from `apps/web`.
+- Recommended production database: Railway Postgres with `DATABASE_PROVIDER=postgres` and `DATABASE_URL` set from the Railway Postgres service.
+- Do not rely on the default SQLite setup on Railway unless you intentionally attach a persistent volume and set `SQLITE_DATABASE_PATH` to that mounted path.
+
+Minimum app service variables:
+
+- `NEXT_PUBLIC_APP_URL=https://<your-app-domain>`
+- `DATABASE_PROVIDER=postgres`
+- `DATABASE_URL=${{Postgres.DATABASE_URL}}`
+
+Optional auth and email variables:
+
+- `POSTMARK_SERVER_TOKEN`
+- `POSTMARK_FROM_EMAIL`
+- `POSTMARK_MESSAGE_STREAM`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `GOOGLE_REDIRECT_URI=https://<your-app-domain>/auth/google/callback`
+- `APPLE_CLIENT_ID`
+- `APPLE_TEAM_ID`
+- `APPLE_KEY_ID`
+- `APPLE_PRIVATE_KEY`
+- `APPLE_REDIRECT_URI=https://<your-app-domain>/auth/apple/callback`
+
 ## Rule
 
 When a feature change lands, update the live delivery tracker in the same pass so completed work, remaining work, validation, and risks stay current.
