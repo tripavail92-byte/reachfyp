@@ -3,6 +3,8 @@ import Link from "next/link";
 import { InteractiveImageFrame } from "../interactive-image-frame";
 import { ThemeToggleButton } from "../theme-toggle-button";
 import { creatorSignupErrorMessages } from "../creator-signup/error-messages";
+
+export const dynamic = "force-dynamic";
 import { getSignupDeviceContext } from "../../lib/auth/signup-device";
 
 const creatorBrands = ["Wealthsimple", "ClickUp", "Hopper", "United Nations", "McDonald's"] as const;

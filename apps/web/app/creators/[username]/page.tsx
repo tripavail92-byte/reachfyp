@@ -1,19 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getCreatorPackageCheckoutId, getCreatorRecordByUsername, listCreatorRecordUsernames, listRelatedCreatorRecords } from "@reachfyp/api";
+import { getCreatorPackageCheckoutId, getCreatorRecordByUsername, listRelatedCreatorRecords } from "@reachfyp/api";
 import { GlassPanel } from "@reachfyp/ui";
 import { InteractiveImageFrame } from "../../interactive-image-frame";
 import { MarketplaceTopNav } from "../../marketplace-top-nav";
+
+export const dynamic = "force-dynamic";
 
 type CreatorProfilePageProps = {
   params: Promise<{
     username: string;
   }>;
 };
-
-export async function generateStaticParams() {
-  return (await listCreatorRecordUsernames()).map((username) => ({ username }));
-}
 
 export default async function CreatorProfilePage({ params }: CreatorProfilePageProps) {
   const { username } = await params;

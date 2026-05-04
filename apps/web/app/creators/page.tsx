@@ -3,6 +3,8 @@ import { GlassPanel } from "@reachfyp/ui";
 import { MarketplaceTopNav } from "../marketplace-top-nav";
 import { CreatorsMarketplaceClient } from "./creators-marketplace-client";
 
+export const dynamic = "force-dynamic";
+
 type CreatorsMarketplacePageProps = {
   searchParams?: Promise<{
     previewState?: string;

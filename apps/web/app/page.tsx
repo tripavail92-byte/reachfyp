@@ -3,6 +3,8 @@ import Link from "next/link";
 import { InteractiveImageFrame } from "./interactive-image-frame";
 import { ThemeToggleButton } from "./theme-toggle-button";
 
+export const dynamic = "force-dynamic";
+
 const navigationLinks = [
   {
     label: "Home",
