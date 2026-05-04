@@ -1,9 +1,21 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import pg, { type PoolClient, type QueryResult } from "pg";
 import { getReachfypDatabaseConfig } from "./database-config";
 import { ensureReachfypBaseSchema } from "./database-schema";
+
+// Minimal interfaces for node:sqlite — imported dynamically so the module is
+// never bundled or evaluated at build time (node:sqlite requires Node 22.5+).
+interface SqliteStatement {
+  get: (...params: unknown[]) => unknown;
+  all: (...params: unknown[]) => unknown[];
+  run: (...params: unknown[]) => { changes: bigint | number };
+}
+
+interface SqliteDatabase {
+  prepare: (sql: string) => SqliteStatement;
+  exec: (sql: string) => void;
+}
 
 const { Pool } = pg;
 
@@ -87,7 +99,7 @@ function compileSql(sql: string, params?: QueryParams): CompiledSql {
   };
 }
 
-function bindSqliteStatement(statement: ReturnType<DatabaseSync["prepare"]>): ReachfypPreparedStatement {
+function bindSqliteStatement(statement: SqliteStatement): ReachfypPreparedStatement {
   function invokeSqliteStatement<T>(method: (...parameters: unknown[]) => T, params?: QueryParams) {
     if (params === undefined) {
       return method();
@@ -114,7 +126,7 @@ function bindSqliteStatement(statement: ReturnType<DatabaseSync["prepare"]>): Re
   };
 }
 
-function createSqliteDatabase(database: DatabaseSync): ReachfypDatabase {
+function createSqliteDatabase(database: SqliteDatabase): ReachfypDatabase {
   return {
     provider: "sqlite",
     prepare(sql) {
@@ -198,6 +210,9 @@ async function getSqliteDatabase() {
   }
 
   const config = getReachfypDatabaseConfig();
+  // Dynamic require so node:sqlite is never evaluated at Next.js build time.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string) => SqliteDatabase };
   mkdirSync(dirname(config.sqliteDatabasePath), { recursive: true });
   const database = new DatabaseSync(config.sqliteDatabasePath);
   sqliteDatabase = createSqliteDatabase(database);
