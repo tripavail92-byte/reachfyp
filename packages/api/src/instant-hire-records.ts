@@ -1573,3 +1573,138 @@ export async function createInstantHireRecord(input: {
   const hire = await getInstantHireRecordById(hireId);
   return hire ? { ok: true as const, hire } : { ok: false as const, error: "package-not-found" as const };
 }
+
+/**
+ * Creates an instant_hire record from an accepted campaign application.
+ * Mirrors createInstantHireRecord but uses application + campaign data instead
+ * of a package lookup. The escrow hold and conversation bootstrap are identical.
+ */
+export async function createCampaignApplicationHireRecord(input: {
+  brandUserId: string;
+  creatorAuthUserId: string;
+  creatorUsername: string;
+  creatorName: string;
+  campaignId: string;
+  applicationId: string;
+  campaignTitle: string;
+  brief: string;
+  proposedPrice: string;
+  deliveryDeadline: string;
+}): Promise<{ ok: true; hire: InstantHireRecord } | { ok: false; error: string }> {
+  const agreedPriceValue = parsePrice(input.proposedPrice);
+
+  if (!Number.isFinite(agreedPriceValue) || agreedPriceValue <= 0) {
+    return { ok: false as const, error: "invalid-price" };
+  }
+
+  const db = await ensureInstantHireTables();
+  const createdAt = new Date().toISOString();
+  const hireId = `hire_${randomUUID()}`;
+  const conversationId = `conv_${randomUUID()}`;
+  const trackingLink = `trk_${hireId}`;
+  const creatorParticipantId = getCreatorParticipantId(input.creatorUsername, input.creatorAuthUserId);
+
+  try {
+    await db.transaction(async (transactionDatabase) => {
+      const brandWallet = await ensureWalletAccount(transactionDatabase, input.brandUserId, defaultBrandWalletBalance, "USD", createdAt);
+      const creatorWallet = await ensureWalletAccount(transactionDatabase, creatorParticipantId, 0, "USD", createdAt);
+
+      if (brandWallet.balance < agreedPriceValue) {
+        throw new Error("insufficient-wallet-balance");
+      }
+
+      const escrowTransactionId = await createWalletTransaction(transactionDatabase, {
+        walletId: brandWallet.id,
+        type: "escrow_hold",
+        amount: agreedPriceValue,
+        currency: brandWallet.currency,
+        referenceType: "campaign_hire",
+        referenceId: hireId,
+        note: `Escrow held for campaign hire: ${input.campaignTitle}`,
+        createdAt,
+      });
+
+      await transactionDatabase.prepare(
+        "UPDATE wallet_accounts SET held_balance = ?, balance = ?, updated_at = ? WHERE id = ?"
+      ).run([brandWallet.held_balance + agreedPriceValue, brandWallet.balance - agreedPriceValue, createdAt, brandWallet.id]);
+
+      await transactionDatabase.prepare(
+        `INSERT INTO conversations (id, type, reference_id, participant_ids_json, last_message_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run([conversationId, "hire", hireId, JSON.stringify([input.brandUserId, creatorParticipantId]), createdAt, createdAt]);
+
+      const briefMessageCreatedAt = new Date(Date.parse(createdAt) + 1).toISOString();
+      await transactionDatabase.prepare(
+        `INSERT INTO messages (id, conversation_id, sender_id, content, media_urls_json, read_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).run([`msg_${randomUUID()}`, conversationId, input.brandUserId, input.brief, JSON.stringify([]), null, briefMessageCreatedAt]);
+
+      await transactionDatabase.prepare("UPDATE conversations SET last_message_at = ? WHERE id = ?").run([briefMessageCreatedAt, conversationId]);
+
+      await transactionDatabase.prepare(
+        `INSERT INTO instant_hires (
+          id, package_id, brand_user_id, creator_participant_id, creator_auth_user_id,
+          creator_username, creator_name, package_title, package_price, agreed_price,
+          delivery_deadline, brief, hire_type, status, escrow_status, tracking_link,
+          conversation_id, brand_wallet_id, creator_wallet_id, escrow_transaction_id,
+          created_at, updated_at
+        ) VALUES (
+          :id, :package_id, :brand_user_id, :creator_participant_id, :creator_auth_user_id,
+          :creator_username, :creator_name, :package_title, :package_price, :agreed_price,
+          :delivery_deadline, :brief, :hire_type, :status, :escrow_status, :tracking_link,
+          :conversation_id, :brand_wallet_id, :creator_wallet_id, :escrow_transaction_id,
+          :created_at, :updated_at
+        )`
+      ).run({
+        id: hireId,
+        package_id: input.applicationId,
+        brand_user_id: input.brandUserId,
+        creator_participant_id: creatorParticipantId,
+        creator_auth_user_id: input.creatorAuthUserId,
+        creator_username: input.creatorUsername,
+        creator_name: input.creatorName,
+        package_title: input.campaignTitle,
+        package_price: input.proposedPrice,
+        agreed_price: input.proposedPrice,
+        delivery_deadline: input.deliveryDeadline,
+        brief: input.brief,
+        hire_type: "instant",
+        status: "accepted",
+        escrow_status: "held-local",
+        tracking_link: trackingLink,
+        conversation_id: conversationId,
+        brand_wallet_id: brandWallet.id,
+        creator_wallet_id: creatorWallet.id,
+        escrow_transaction_id: escrowTransactionId,
+        created_at: createdAt,
+        updated_at: createdAt,
+      });
+
+      await createNotification(transactionDatabase, {
+        userId: input.brandUserId,
+        type: "hire_created",
+        title: "Campaign application accepted",
+        body: `You accepted ${input.creatorName} for ${input.campaignTitle}. Escrow held.`,
+        link: `/dashboard/hires/${hireId}`,
+        createdAt,
+      });
+
+      await createNotification(transactionDatabase, {
+        userId: creatorParticipantId,
+        type: "hire_created",
+        title: "Campaign application accepted",
+        body: `Your application for ${input.campaignTitle} was accepted. Check the hire for the brief and deadline.`,
+        link: `/creator/hires/${hireId}`,
+        createdAt,
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "insufficient-wallet-balance") {
+      return { ok: false as const, error: "insufficient-wallet-balance" };
+    }
+    throw error;
+  }
+
+  const hire = await getInstantHireRecordById(hireId);
+  return hire ? { ok: true as const, hire } : { ok: false as const, error: "hire-not-found" };
+}

@@ -37,6 +37,7 @@ export {
   approveDeliverableForHire,
   createPayoutRequest,
   createInstantHireRecord,
+  createCampaignApplicationHireRecord,
   getConversationById,
   getInstantHireDetailById,
   getInstantHireRecordById,

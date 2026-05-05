@@ -35,6 +35,11 @@ export async function POST(
     return NextResponse.redirect(detailUrl, 303);
   }
 
+  // If acceptance created a hire, go directly to the hire detail page
+  if (decision === "accepted" && result.hireId) {
+    return NextResponse.redirect(new URL(`/dashboard/hires/${result.hireId}`, request.url), 303);
+  }
+
   detailUrl.searchParams.set("status", "reviewed");
   return NextResponse.redirect(detailUrl, 303);
 }

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getReachfypDatabase } from "./creator-database";
 import { ensureReachfypBaseSchema } from "./database-schema";
+import { createCampaignApplicationHireRecord } from "./instant-hire-records";
 
 export type CampaignStatus = "draft" | "open" | "in_progress" | "completed" | "cancelled";
 export type ApplicationStatus = "pending" | "accepted" | "rejected" | "withdrawn";
@@ -311,23 +312,76 @@ export async function reviewCampaignApplication(
   applicationId: string,
   brandUserId: string,
   status: "accepted" | "rejected",
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; hireId?: string } | { ok: false; error: string }> {
   const db = await ensureCampaignTables();
 
-  // Verify the application belongs to a campaign owned by this brand
+  // Fetch full context needed for hire creation on acceptance
+  type ApplicationWithCampaign = {
+    id: string;
+    status: string;
+    brand_user_id: string;
+    creator_auth_user_id: string;
+    creator_username: string;
+    creator_name: string;
+    proposed_price: string;
+    message: string;
+    campaign_id: string;
+    campaign_title: string;
+    campaign_deliverables: string;
+    campaign_description: string;
+    timeline_end: string;
+  };
+
   const appRow = await db
-    .prepare("SELECT a.id, a.status, c.brand_user_id FROM campaign_applications a JOIN campaigns c ON a.campaign_id = c.id WHERE a.id = ? LIMIT 1")
-    .get<{ id: string; status: string; brand_user_id: string }>([applicationId]);
+    .prepare(`SELECT
+      a.id, a.status, a.creator_auth_user_id, a.creator_username, a.creator_name,
+      a.proposed_price, a.message, a.campaign_id,
+      c.brand_user_id, c.title AS campaign_title, c.deliverables AS campaign_deliverables,
+      c.description AS campaign_description, c.timeline_end
+    FROM campaign_applications a
+    JOIN campaigns c ON a.campaign_id = c.id
+    WHERE a.id = ? LIMIT 1`)
+    .get<ApplicationWithCampaign>([applicationId]);
 
   if (!appRow) return { ok: false, error: "application-not-found" };
   if (appRow.brand_user_id !== brandUserId) return { ok: false, error: "not-authorized" };
   if (appRow.status !== "pending") return { ok: false, error: "application-already-reviewed" };
 
+  const reviewedAt = new Date().toISOString();
   await db.prepare(
     "UPDATE campaign_applications SET status = ?, reviewed_at = ? WHERE id = ?"
-  ).run([status, new Date().toISOString(), applicationId]);
+  ).run([status, reviewedAt, applicationId]);
 
-  return { ok: true };
+  if (status !== "accepted") {
+    return { ok: true };
+  }
+
+  // Build hire brief from campaign deliverables + description
+  const brief = [
+    appRow.campaign_description,
+    appRow.campaign_deliverables ? `Deliverables:\n${appRow.campaign_deliverables}` : "",
+    appRow.message ? `Creator note:\n${appRow.message}` : "",
+  ].filter(Boolean).join("\n\n");
+
+  const hireResult = await createCampaignApplicationHireRecord({
+    brandUserId,
+    creatorAuthUserId: appRow.creator_auth_user_id,
+    creatorUsername: appRow.creator_username,
+    creatorName: appRow.creator_name,
+    campaignId: appRow.campaign_id,
+    applicationId,
+    campaignTitle: appRow.campaign_title,
+    brief,
+    proposedPrice: appRow.proposed_price,
+    deliveryDeadline: appRow.timeline_end,
+  });
+
+  if (!hireResult.ok) {
+    // Application status is already updated — log the hire failure but don't roll back
+    return { ok: true, hireId: undefined };
+  }
+
+  return { ok: true, hireId: hireResult.hire.id };
 }
 
 export async function withdrawCampaignApplication(
