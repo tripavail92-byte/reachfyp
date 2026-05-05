@@ -31,6 +31,11 @@ export type CreatorSocialAccount = {
   handle: string;
   url: string;
   followers: string;
+  followerCount?: number | null;
+  engagementRate?: number | null;
+  postCount?: number | null;
+  avgViews?: number | null;
+  isVerified?: boolean;
   syncStatus: string;
   lastSyncedAt: string | null;
 };
@@ -65,6 +70,8 @@ export type CreatorRecord = {
     source: string;
     quote: string;
   }>;
+  scoringSignalsJson?: string;
+  lastScoredAt?: string;
 };
 
 export type CreatorPackageSelection = {
@@ -299,8 +306,11 @@ export async function deleteCreatorSocialAccountForAuthUser(authUserId: string, 
   return deleteStoredCreatorSocialAccountForAuthUser(creatorSeedRecords, authUserId, platform);
 }
 
-export async function syncCreatorSocialAccountForAuthUser(authUserId: string, platform: string) {
-  return syncStoredCreatorSocialAccountForAuthUser(creatorSeedRecords, authUserId, platform);
+export async function syncCreatorSocialAccountForAuthUser(authUserId: string, platform: string, platformConfig?: {
+  youtubeApiKey?: string;
+  xBearerToken?: string;
+}) {
+  return syncStoredCreatorSocialAccountForAuthUser(creatorSeedRecords, authUserId, platform, platformConfig);
 }
 
 export async function listRelatedCreatorRecords(username: string, limit = 2) {

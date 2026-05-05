@@ -1,6 +1,7 @@
 import { syncCreatorSocialAccountForAuthUser } from "@reachfyp/api";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentSessionUser } from "../../../../lib/auth/session";
+import serverEnv from "../../../../lib/env/server";
 
 function getRedirectUrl(request: NextRequest, params: Record<string, string>) {
   const redirectUrl = new URL("/creator/profile", request.url);
@@ -21,7 +22,10 @@ export async function POST(request: NextRequest) {
 
   const formData = await request.formData();
   const platform = String(formData.get("platform") ?? "").trim();
-  const result = await syncCreatorSocialAccountForAuthUser(currentUser.id, platform);
+  const result = await syncCreatorSocialAccountForAuthUser(currentUser.id, platform, {
+    youtubeApiKey: serverEnv.youtubeApiKey || undefined,
+    xBearerToken: serverEnv.xBearerToken || undefined,
+  });
 
   if (!result.ok) {
     return NextResponse.redirect(getRedirectUrl(request, { error: result.error }), 303);

@@ -17,6 +17,16 @@ const serverEnv = {
   postmarkServerToken: process.env.POSTMARK_SERVER_TOKEN ?? "",
   postmarkFromEmail: process.env.POSTMARK_FROM_EMAIL ?? "",
   postmarkMessageStream: process.env.POSTMARK_MESSAGE_STREAM ?? "outbound",
+  // Social platform API keys (app-level, no user OAuth required)
+  youtubeApiKey: process.env.YOUTUBE_API_KEY ?? "",
+  xBearerToken: process.env.X_BEARER_TOKEN ?? "",
+  // Social platform OAuth apps (user OAuth required for sync)
+  instagramAppId: process.env.INSTAGRAM_APP_ID ?? "",
+  instagramAppSecret: process.env.INSTAGRAM_APP_SECRET ?? "",
+  instagramRedirectUri: process.env.INSTAGRAM_REDIRECT_URI ?? `${appUrl}/creator/socials/oauth-callback?platform=instagram`,
+  tiktokClientKey: process.env.TIKTOK_CLIENT_KEY ?? "",
+  tiktokClientSecret: process.env.TIKTOK_CLIENT_SECRET ?? "",
+  tiktokRedirectUri: process.env.TIKTOK_REDIRECT_URI ?? `${appUrl}/creator/socials/oauth-callback?platform=tiktok`,
 } as const;
 
 export function hasAppleAuthConfig() {
@@ -31,6 +41,22 @@ export function hasGoogleAuthConfig() {
 
 export function hasPostmarkEmailConfig() {
   return Boolean(serverEnv.postmarkServerToken && serverEnv.postmarkFromEmail);
+}
+
+export function hasYouTubeApiConfig() {
+  return Boolean(serverEnv.youtubeApiKey);
+}
+
+export function hasXApiConfig() {
+  return Boolean(serverEnv.xBearerToken);
+}
+
+export function hasInstagramOAuthConfig() {
+  return Boolean(serverEnv.instagramAppId && serverEnv.instagramAppSecret);
+}
+
+export function hasTikTokOAuthConfig() {
+  return Boolean(serverEnv.tiktokClientKey && serverEnv.tiktokClientSecret);
 }
 
 export default serverEnv;

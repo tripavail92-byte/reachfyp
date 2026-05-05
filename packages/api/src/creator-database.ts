@@ -1,5 +1,8 @@
 import { getReachfypDatabaseClient, listTableColumns, tableExists, type ReachfypDatabase } from "./database-client";
 import type { CreatorPackage, CreatorRecord, CreatorSocialAccount } from "./creator-records";
+import { syncYouTubePlatformAccount, syncXPlatformAccount, syncInstagramPlatformAccount, syncTikTokPlatformAccount } from "./social-platform-adapters";
+import { buildScoringSignalsFromData, computeCreatorBadges, computeCreatorScores } from "./scoring-engine";
+import { getSocialTokenForCreator } from "./social-token-records";
 
 export type CreatorProfileUpsertInput = {
   authUserId: string;
@@ -56,11 +59,15 @@ type CreatorRow = {
   social_accounts_json: string | null;
   portfolio_json: string;
   reviews_json: string;
+  scoring_signals_json: string | null;
+  last_scored_at: string | null;
 };
 
 const creatorColumnDefinitions = [
   { name: "auth_user_id", definition: "TEXT" },
   { name: "social_accounts_json", definition: "TEXT" },
+  { name: "scoring_signals_json", definition: "TEXT" },
+  { name: "last_scored_at", definition: "TEXT" },
 ] as const;
 const defaultCreatorMetrics = {
   authenticity: 72,
@@ -122,6 +129,8 @@ function toCreatorRow(creator: CreatorRecord, authUserId: string | null = null):
     social_accounts_json: JSON.stringify(creator.socialAccounts),
     portfolio_json: JSON.stringify(creator.portfolio),
     reviews_json: JSON.stringify(creator.reviews),
+    scoring_signals_json: creator.scoringSignalsJson ?? null,
+    last_scored_at: creator.lastScoredAt ?? null,
   };
 }
 
@@ -158,6 +167,8 @@ function fromCreatorRow(row: CreatorRow): CreatorRecord {
     socialAccounts: parseCreatorSocialAccounts(row.social_accounts_json),
     portfolio: JSON.parse(row.portfolio_json),
     reviews: JSON.parse(row.reviews_json),
+    scoringSignalsJson: row.scoring_signals_json ?? undefined,
+    lastScoredAt: row.last_scored_at ?? undefined,
   };
 }
 
@@ -186,7 +197,9 @@ function getUpdateCreatorStatement(db: ReachfypDatabase) {
         packages_json = :packages_json,
         social_accounts_json = :social_accounts_json,
         portfolio_json = :portfolio_json,
-        reviews_json = :reviews_json
+        reviews_json = :reviews_json,
+        scoring_signals_json = :scoring_signals_json,
+        last_scored_at = :last_scored_at
     WHERE auth_user_id = :auth_user_id
   `);
 }
@@ -216,7 +229,9 @@ function getInsertCreatorStatement(db: ReachfypDatabase) {
       packages_json,
       social_accounts_json,
       portfolio_json,
-      reviews_json
+      reviews_json,
+      scoring_signals_json,
+      last_scored_at
     ) VALUES (
       :id,
       :username,
@@ -240,7 +255,9 @@ function getInsertCreatorStatement(db: ReachfypDatabase) {
       :packages_json,
       :social_accounts_json,
       :portfolio_json,
-      :reviews_json
+      :reviews_json,
+      :scoring_signals_json,
+      :last_scored_at
     )
   `);
 }
@@ -270,7 +287,9 @@ function getUpdateCreatorByUsernameStatement(db: ReachfypDatabase) {
         packages_json = :packages_json,
         social_accounts_json = :social_accounts_json,
         portfolio_json = :portfolio_json,
-        reviews_json = :reviews_json
+        reviews_json = :reviews_json,
+        scoring_signals_json = :scoring_signals_json,
+        last_scored_at = :last_scored_at
     WHERE username = :match_username
   `);
 }
@@ -385,7 +404,9 @@ async function seedCreatorDatabase(seedRecords: CreatorRecord[]) {
       packages_json,
       social_accounts_json,
       portfolio_json,
-      reviews_json
+      reviews_json,
+      scoring_signals_json,
+      last_scored_at
     ) VALUES (
       :id,
       :username,
@@ -409,7 +430,9 @@ async function seedCreatorDatabase(seedRecords: CreatorRecord[]) {
       :packages_json,
       :social_accounts_json,
       :portfolio_json,
-      :reviews_json
+      :reviews_json,
+      :scoring_signals_json,
+      :last_scored_at
     )
   `);
 
@@ -633,7 +656,10 @@ export async function deleteStoredCreatorSocialAccountForAuthUser(seedRecords: C
   return { ok: true as const, creator: nextCreator };
 }
 
-export async function syncStoredCreatorSocialAccountForAuthUser(seedRecords: CreatorRecord[], authUserId: string, platform: string) {
+export async function syncStoredCreatorSocialAccountForAuthUser(seedRecords: CreatorRecord[], authUserId: string, platform: string, platformConfig?: {
+  youtubeApiKey?: string;
+  xBearerToken?: string;
+}) {
   await seedCreatorDatabase(seedRecords);
 
   const db = await getReachfypDatabase();
@@ -646,26 +672,101 @@ export async function syncStoredCreatorSocialAccountForAuthUser(seedRecords: Cre
   const creator = fromCreatorRow(existingByAuthUser);
   const syncedAt = new Date().toISOString();
   let foundAccount = false;
-  const nextSocialAccounts = creator.socialAccounts.map((account) => {
-    if (account.platform !== platform) {
+  let syncError: string | null = null;
+
+  const nextSocialAccounts = await Promise.all(creator.socialAccounts.map(async (account) => {
+    if (account.platform.toLowerCase() !== platform.toLowerCase()) {
       return account;
     }
 
     foundAccount = true;
+
+    // Attempt a real platform API sync
+    let syncResult: Awaited<ReturnType<typeof syncYouTubePlatformAccount>> | null = null;
+    const platformLower = platform.toLowerCase();
+
+    try {
+      if (platformLower === "youtube" && platformConfig?.youtubeApiKey) {
+        syncResult = await syncYouTubePlatformAccount(account.handle, platformConfig.youtubeApiKey);
+      } else if ((platformLower === "x" || platformLower === "twitter") && platformConfig?.xBearerToken) {
+        syncResult = await syncXPlatformAccount(account.handle, platformConfig.xBearerToken);
+      } else {
+        // Check for stored OAuth token (Instagram, TikTok)
+        const storedToken = await getSocialTokenForCreator(authUserId, platform);
+        if (storedToken) {
+          if (platformLower === "instagram") {
+            syncResult = await syncInstagramPlatformAccount(storedToken.accessToken);
+          } else if (platformLower === "tiktok") {
+            syncResult = await syncTikTokPlatformAccount(storedToken.accessToken);
+          }
+        }
+      }
+    } catch {
+      // Platform API call failed — fall through to metadata-only update
+    }
+
+    if (syncResult?.ok) {
+      return {
+        ...account,
+        followers: syncResult.displayFollowers,
+        followerCount: syncResult.followerCount,
+        engagementRate: syncResult.engagementRate,
+        postCount: syncResult.postCount,
+        avgViews: syncResult.avgViews,
+        isVerified: syncResult.isVerified,
+        syncStatus: "Live data",
+        lastSyncedAt: syncedAt,
+      };
+    }
+
+    if (syncResult && !syncResult.ok) {
+      syncError = syncResult.error;
+    }
+
+    // Metadata-only update when API not available
     return {
       ...account,
-      syncStatus: "Synced just now",
+      syncStatus: syncResult ? `API unavailable: ${syncError}` : "Sync marker updated",
       lastSyncedAt: syncedAt,
     };
-  });
+  }));
 
   if (!foundAccount) {
     return { ok: false as const, error: "social-account-not-found" as const };
   }
 
+  // Recompute scores after sync
+  const socialSignals = nextSocialAccounts.map((a) => ({
+    followerCount: a.followerCount ?? null,
+    engagementRate: a.engagementRate ?? null,
+    postCount: a.postCount ?? null,
+    avgViews: a.avgViews ?? null,
+  }));
+
+  const scoringSignals = buildScoringSignalsFromData(socialSignals, {
+    totalHires: 0,
+    onTimeHires: 0,
+    totalRevisionRequests: 0,
+    totalDeliverables: 0,
+    avgRating: null,
+    trackingClicks30d: 0,
+    trackingConversions30d: 0,
+  });
+
+  const computed = computeCreatorScores(scoringSignals);
+  const updatedBadges = computeCreatorBadges(computed.authenticity, computed.audienceQuality, computed.performance);
+
   const nextCreator: CreatorRecord = {
     ...creator,
     socialAccounts: nextSocialAccounts,
+    authenticity: computed.authenticity,
+    performance: computed.performance,
+    audienceQuality: computed.audienceQuality,
+    growthSignal: computed.growthSignal,
+    deliveryQuality: computed.deliveryQuality,
+    badges: updatedBadges.length > 0 ? updatedBadges : creator.badges,
+    scoringSignalsJson: computed.scoringSignalsJson,
+    lastScoredAt: syncedAt,
   };
 
   await saveCreatorRecordForAuthUser(db, nextCreator, authUserId, false);

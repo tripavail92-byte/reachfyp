@@ -77,6 +77,38 @@ export {
   upsertGoogleAuthUser,
 } from "./auth-records";
 
+export {
+  createCampaign,
+  getCampaignById,
+  listOpenCampaigns,
+  listCampaignsForBrand,
+  updateCampaignStatus,
+  applyToCampaign,
+  listApplicationsForCampaign,
+  listApplicationsForCreator,
+  reviewCampaignApplication,
+  withdrawCampaignApplication,
+} from "./campaign-records";
+
+export {
+  getSocialTokenForCreator,
+  upsertSocialTokenForCreator,
+  deleteSocialTokenForCreator,
+} from "./social-token-records";
+
+export {
+  buildInstagramOAuthUrl,
+  buildTikTokOAuthUrl,
+  exchangeInstagramCode,
+  exchangeTikTokCode,
+} from "./social-platform-adapters";
+
+export {
+  computeCreatorScores,
+  computeCreatorBadges,
+  buildScoringSignalsFromData,
+} from "./scoring-engine";
+
 export type {
   CreatorPackage,
   CreatorPackageSelection,
@@ -104,3 +136,13 @@ export type {
   WalletTransaction,
 } from "./instant-hire-records";
 export type { AuthUser, AuthUserRole } from "./auth-records";
+export type {
+  Campaign,
+  CampaignApplication,
+  CampaignStatus,
+  ApplicationStatus,
+  CreateCampaignInput,
+  ApplyToCampaignInput,
+} from "./campaign-records";
+export type { SocialToken } from "./social-token-records";
+export type { ScoringSignals, ComputedScores } from "./scoring-engine";

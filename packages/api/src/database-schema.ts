@@ -151,6 +151,49 @@ const reachfypTableStatements = [
     created_at TEXT NOT NULL,
     reviewed_at TEXT
   )`,
+  `CREATE TABLE IF NOT EXISTS creator_social_tokens (
+    id TEXT PRIMARY KEY,
+    creator_auth_user_id TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT,
+    token_expires_at TEXT,
+    scope TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(creator_auth_user_id, platform)
+  )`,
+  `CREATE TABLE IF NOT EXISTS campaigns (
+    id TEXT PRIMARY KEY,
+    brand_user_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    objective TEXT NOT NULL,
+    description TEXT NOT NULL,
+    budget TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    platforms_json TEXT NOT NULL,
+    niche_json TEXT NOT NULL,
+    deliverables TEXT NOT NULL,
+    timeline_start TEXT NOT NULL,
+    timeline_end TEXT NOT NULL,
+    requirements TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS campaign_applications (
+    id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL,
+    creator_auth_user_id TEXT NOT NULL,
+    creator_username TEXT NOT NULL,
+    creator_name TEXT NOT NULL,
+    package_id TEXT,
+    message TEXT NOT NULL,
+    proposed_price TEXT NOT NULL,
+    status TEXT NOT NULL,
+    applied_at TEXT NOT NULL,
+    reviewed_at TEXT
+  )`,
 ] as const;
 
 const reachfypIndexStatements = [
