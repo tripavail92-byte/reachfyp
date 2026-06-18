@@ -1,4 +1,4 @@
-import { createPayoutRequest } from "@reachfyp/api";
+import { createPayoutRequest, parsePriceToCents } from "@reachfyp/api";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentSessionUser } from "../../../../lib/auth/session";
 
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
   }
 
   const formData = await request.formData();
-  const amount = Number(String(formData.get("amount") ?? "").replace(/[^0-9.]/g, ""));
+  const amount = parsePriceToCents(String(formData.get("amount") ?? ""));
   const note = String(formData.get("note") ?? "").trim();
   const result = await createPayoutRequest({
     creatorUserId: currentUser.id,

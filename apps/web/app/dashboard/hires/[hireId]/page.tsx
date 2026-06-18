@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getInstantHireDetailById } from "@reachfyp/api";
+import { formatCents, getInstantHireDetailById } from "@reachfyp/api";
 import { GlassPanel } from "@reachfyp/ui";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentSessionUser } from "../../../../lib/auth/session";
@@ -162,19 +162,19 @@ export default async function HireDetailPage({ params, searchParams }: HireDetai
             <div className="profile-list-grid">
               <div className="profile-list-card">
                 <h3 className="panel-card-title">Brand available balance</h3>
-                <p className="profile-list-card__copy">${hireDetail.brandWallet.balance.toFixed(2)}</p>
+                <p className="profile-list-card__copy">${formatCents(hireDetail.brandWallet.balance)}</p>
               </div>
               <div className="profile-list-card">
                 <h3 className="panel-card-title">Brand held balance</h3>
-                <p className="profile-list-card__copy">${hireDetail.brandWallet.heldBalance.toFixed(2)}</p>
+                <p className="profile-list-card__copy">${formatCents(hireDetail.brandWallet.heldBalance)}</p>
               </div>
               <div className="profile-list-card">
                 <h3 className="panel-card-title">Latest escrow ledger entry</h3>
-                <p className="profile-list-card__copy">{latestTransaction ? `${latestTransaction.type} · $${latestTransaction.amount.toFixed(2)}` : "No wallet transaction found."}</p>
+                <p className="profile-list-card__copy">{latestTransaction ? `${latestTransaction.type} · $${formatCents(latestTransaction.amount)}` : "No wallet transaction found."}</p>
               </div>
               <div className="profile-list-card">
                 <h3 className="panel-card-title">Creator payout ledger</h3>
-                <p className="profile-list-card__copy">{latestCreatorTransaction ? `${latestCreatorTransaction.type} · $${latestCreatorTransaction.amount.toFixed(2)}` : "No creator wallet transaction yet."}</p>
+                <p className="profile-list-card__copy">{latestCreatorTransaction ? `${latestCreatorTransaction.type} · $${formatCents(latestCreatorTransaction.amount)}` : "No creator wallet transaction yet."}</p>
               </div>
             </div>
           </GlassPanel>

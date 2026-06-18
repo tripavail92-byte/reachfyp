@@ -4,6 +4,7 @@ import { listTableColumns, type ReachfypDatabase } from "./database-client";
 import { ensureReachfypBaseSchema } from "./database-schema";
 import { getCreatorPackageByCheckoutId } from "./creator-records";
 import { listAuthUsersByRole } from "./auth-records";
+import { formatCents, parsePriceToCents } from "./money";
 
 export type InstantHireStatus = "accepted" | "submitted" | "revision_requested" | "approved" | "cancelled";
 export type InstantHireEscrowStatus = "held-local" | "released-local" | "refunded-local";
@@ -245,7 +246,11 @@ type PayoutRequestRow = {
 };
 
 const localSystemSenderId = "system";
-const defaultBrandWalletBalance = 10000;
+// Demo brand wallets are seeded with $10,000.00, stored as integer cents.
+const defaultBrandWalletBalance = 1_000_000;
+
+// Runs the dollars -> integer-cents data migration once per process.
+let moneyUnitMigrationPromise: Promise<void> | null = null;
 
 async function ensureTableColumns(
   tableName: string,
@@ -281,11 +286,47 @@ async function ensureInstantHireTables() {
 
   await db.prepare("UPDATE instant_hires SET updated_at = created_at WHERE updated_at IS NULL").run();
 
+  moneyUnitMigrationPromise ??= ensureMoneyStoredAsCents(db);
+  await moneyUnitMigrationPromise;
+
   return db;
 }
 
-function parsePrice(price: string) {
-  return Number(price.replace(/[^0-9.]/g, ""));
+/**
+ * One-time, idempotent migration that converts any money stored as whole
+ * dollars (the original schema) into integer cents. A marker row in
+ * reachfyp_meta guards it so it runs at most once per database; on a fresh
+ * database the money tables are empty, so the conversion is a harmless no-op
+ * and only the marker is written.
+ */
+async function ensureMoneyStoredAsCents(db: ReachfypDatabase) {
+  const marker = await db.prepare("SELECT value FROM reachfyp_meta WHERE key = ?").get<{ value: string }>(["money_unit"]);
+
+  if (marker?.value === "cents") {
+    return;
+  }
+
+  const markerUpsert =
+    db.provider === "postgres"
+      ? "INSERT INTO reachfyp_meta (key, value) VALUES ('money_unit', 'cents') ON CONFLICT (key) DO UPDATE SET value = 'cents'"
+      : "INSERT OR REPLACE INTO reachfyp_meta (key, value) VALUES ('money_unit', 'cents')";
+
+  await db.transaction(async (transactionDatabase) => {
+    await transactionDatabase.prepare("UPDATE wallet_accounts SET balance = ROUND(balance * 100), held_balance = ROUND(held_balance * 100)").run();
+    await transactionDatabase.prepare("UPDATE wallet_transactions SET amount = ROUND(amount * 100)").run();
+    await transactionDatabase.prepare("UPDATE payout_requests SET amount = ROUND(amount * 100)").run();
+    await transactionDatabase.prepare(markerUpsert).run();
+  });
+}
+
+/**
+ * Reads a wallet row inside a transaction, taking a row lock on Postgres so
+ * concurrent escrow/payout mutations can't read-modify-write the same balance
+ * and overspend. SQLite serializes writers, so the lock clause is omitted there.
+ */
+async function getWalletRowForUpdate(transactionDatabase: ReachfypDatabase, walletId: string) {
+  const lockClause = transactionDatabase.provider === "postgres" ? " FOR UPDATE" : "";
+  return transactionDatabase.prepare(`SELECT * FROM wallet_accounts WHERE id = ? LIMIT 1${lockClause}`).get<WalletAccountRow>([walletId]);
 }
 
 function getCreatorParticipantId(creatorUsername: string, creatorAuthUserId: string | null) {
@@ -423,7 +464,10 @@ async function getWalletAccountRowById(walletId: string) {
 }
 
 async function ensureWalletAccount(db: ReachfypDatabase, userId: string, defaultBalance: number, currency: string, timestamp: string) {
-  const existingWallet = await getWalletAccountRowByUserId(userId);
+  // Read on the transaction handle (not the global pool) and lock the row on
+  // Postgres so the balance read and any follow-up debit stay atomic.
+  const lockClause = db.provider === "postgres" ? " FOR UPDATE" : "";
+  const existingWallet = await db.prepare(`SELECT * FROM wallet_accounts WHERE user_id = ? LIMIT 1${lockClause}`).get<WalletAccountRow>([userId]);
 
   if (existingWallet) {
     return existingWallet;
@@ -758,29 +802,57 @@ export async function createPayoutRequest(input: {
   const createdAt = new Date().toISOString();
   const payoutRequestId = `payout_${randomUUID()}`;
 
-  await db.transaction(async (transactionDatabase) => {
-    await transactionDatabase.prepare(
-      `INSERT INTO payout_requests (id, creator_user_id, wallet_id, amount, currency, status, note, admin_note, created_at, reviewed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run([payoutRequestId, input.creatorUserId, wallet.id, input.amount, wallet.currency, "pending", note, null, createdAt, null]);
+  try {
+    await db.transaction(async (transactionDatabase) => {
+      // Lock the wallet row and re-check availability against committed pending
+      // requests so two concurrent payout requests can't both pass the check.
+      const lockedWallet = await getWalletRowForUpdate(transactionDatabase, wallet.id);
 
-    await createNotification(transactionDatabase, {
-      userId: input.creatorUserId,
-      type: "payout_requested",
-      title: "Payout request submitted",
-      body: `Your payout request for $${input.amount.toFixed(2)} is waiting for admin review.`,
-      link: "/creator/payouts",
-      createdAt,
-    });
+      if (!lockedWallet) {
+        throw new Error("wallet-missing");
+      }
 
-    await notifyAdmins(transactionDatabase, {
-      type: "payout_requested",
-      title: "New payout request",
-      body: `A creator requested a payout of $${input.amount.toFixed(2)}.`,
-      link: "/admin/payouts",
-      createdAt,
+      const pendingRow = await transactionDatabase
+        .prepare("SELECT COALESCE(SUM(amount), 0) as total FROM payout_requests WHERE creator_user_id = ? AND status = 'pending'")
+        .get<{ total: number }>([input.creatorUserId]);
+
+      if (lockedWallet.balance - (pendingRow?.total ?? 0) < input.amount) {
+        throw new Error("insufficient-available-balance");
+      }
+
+      await transactionDatabase.prepare(
+        `INSERT INTO payout_requests (id, creator_user_id, wallet_id, amount, currency, status, note, admin_note, created_at, reviewed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run([payoutRequestId, input.creatorUserId, wallet.id, input.amount, wallet.currency, "pending", note, null, createdAt, null]);
+
+      await createNotification(transactionDatabase, {
+        userId: input.creatorUserId,
+        type: "payout_requested",
+        title: "Payout request submitted",
+        body: `Your payout request for $${formatCents(input.amount)} is waiting for admin review.`,
+        link: "/creator/payouts",
+        createdAt,
+      });
+
+      await notifyAdmins(transactionDatabase, {
+        type: "payout_requested",
+        title: "New payout request",
+        body: `A creator requested a payout of $${formatCents(input.amount)}.`,
+        link: "/admin/payouts",
+        createdAt,
+      });
     });
-  });
+  } catch (error) {
+    if (error instanceof Error && error.message === "insufficient-available-balance") {
+      return { ok: false as const, error: "invalid-hire-state" as const };
+    }
+
+    if (error instanceof Error && error.message === "wallet-missing") {
+      return { ok: false as const, error: "not-authorized" as const };
+    }
+
+    throw error;
+  }
 
   const payoutRequest = await getPayoutRequestRowById(payoutRequestId);
   return payoutRequest ? { ok: true as const, payoutRequest: toPayoutRequestRecord(payoutRequest) } : { ok: false as const, error: "missing-fields" as const };
@@ -816,33 +888,47 @@ export async function reviewPayoutRequest(input: {
   const reviewedAt = new Date().toISOString();
   const db = await ensureInstantHireTables();
 
-  await db.transaction(async (transactionDatabase) => {
-    await transactionDatabase.prepare("UPDATE payout_requests SET status = ?, admin_note = ?, reviewed_at = ? WHERE id = ?").run([input.action === "approve" ? "approved" : "rejected", adminNote, reviewedAt, payoutRequest.id]);
+  try {
+    await db.transaction(async (transactionDatabase) => {
+      await transactionDatabase.prepare("UPDATE payout_requests SET status = ?, admin_note = ?, reviewed_at = ? WHERE id = ?").run([input.action === "approve" ? "approved" : "rejected", adminNote, reviewedAt, payoutRequest.id]);
 
-    if (input.action === "approve") {
-      await transactionDatabase.prepare("UPDATE wallet_accounts SET balance = ?, updated_at = ? WHERE id = ?").run([wallet.balance - payoutRequest.amount, reviewedAt, wallet.id]);
+      if (input.action === "approve") {
+        const lockedWallet = await getWalletRowForUpdate(transactionDatabase, wallet.id);
 
-      await createWalletTransaction(transactionDatabase, {
-        walletId: wallet.id,
-        type: "withdrawal",
-        amount: payoutRequest.amount,
-        currency: wallet.currency,
-        referenceType: "payout_request",
-        referenceId: payoutRequest.id,
-        note: `Admin approved payout request ${payoutRequest.id}`,
+        if (!lockedWallet || lockedWallet.balance < payoutRequest.amount) {
+          throw new Error("insufficient-wallet-balance");
+        }
+
+        await transactionDatabase.prepare("UPDATE wallet_accounts SET balance = ?, updated_at = ? WHERE id = ?").run([lockedWallet.balance - payoutRequest.amount, reviewedAt, wallet.id]);
+
+        await createWalletTransaction(transactionDatabase, {
+          walletId: wallet.id,
+          type: "withdrawal",
+          amount: payoutRequest.amount,
+          currency: wallet.currency,
+          referenceType: "payout_request",
+          referenceId: payoutRequest.id,
+          note: `Admin approved payout request ${payoutRequest.id}`,
+          createdAt: reviewedAt,
+        });
+      }
+
+      await createNotification(transactionDatabase, {
+        userId: payoutRequest.creator_user_id,
+        type: input.action === "approve" ? "payout_approved" : "payout_rejected",
+        title: input.action === "approve" ? "Payout request approved" : "Payout request rejected",
+        body: adminNote,
+        link: "/creator/payouts",
         createdAt: reviewedAt,
       });
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "insufficient-wallet-balance") {
+      return { ok: false as const, error: "invalid-hire-state" as const };
     }
 
-    await createNotification(transactionDatabase, {
-      userId: payoutRequest.creator_user_id,
-      type: input.action === "approve" ? "payout_approved" : "payout_rejected",
-      title: input.action === "approve" ? "Payout request approved" : "Payout request rejected",
-      body: adminNote,
-      link: "/creator/payouts",
-      createdAt: reviewedAt,
-    });
-  });
+    throw error;
+  }
 
   const reviewed = await getPayoutRequestRowById(payoutRequest.id);
   return reviewed ? { ok: true as const, payoutRequest: toPayoutRequestRecord(reviewed) } : { ok: false as const, error: "deliverable-not-found" as const };
@@ -866,7 +952,7 @@ export async function adminModerateInstantHire(input: {
   }
 
   const actedAt = new Date().toISOString();
-  const agreedPriceValue = parsePrice(hire.agreedPrice);
+  const agreedPriceValue = parsePriceToCents(hire.agreedPrice);
   const brandWallet = await getWalletAccountRowById(hire.brandWalletId);
   const creatorWallet = await getWalletAccountRowById(hire.creatorWalletId);
   const latestDeliverable = await getLatestDeliverableRowByHireId(hire.id);
@@ -885,89 +971,104 @@ export async function adminModerateInstantHire(input: {
 
   const db = await ensureInstantHireTables();
 
-  await db.transaction(async (transactionDatabase) => {
-    if (input.action === "force_release") {
-      await transactionDatabase.prepare("UPDATE deliverables SET status = ?, review_feedback = ?, reviewed_at = ?, approved_at = ? WHERE id = ?").run(["approved", note, actedAt, actedAt, latestDeliverable!.id]);
-      await transactionDatabase.prepare("UPDATE wallet_accounts SET held_balance = ?, updated_at = ? WHERE id = ?").run([brandWallet.held_balance - agreedPriceValue, actedAt, brandWallet.id]);
-      await transactionDatabase.prepare("UPDATE wallet_accounts SET balance = ?, updated_at = ? WHERE id = ?").run([creatorWallet.balance + agreedPriceValue, actedAt, creatorWallet.id]);
+  try {
+    await db.transaction(async (transactionDatabase) => {
+      const lockedBrand = await getWalletRowForUpdate(transactionDatabase, brandWallet.id);
+      const lockedCreator = await getWalletRowForUpdate(transactionDatabase, creatorWallet.id);
 
-      await createWalletTransaction(transactionDatabase, {
-        walletId: brandWallet.id,
-        type: "escrow_release",
-        amount: agreedPriceValue,
-        currency: brandWallet.currency,
-        referenceType: "campaign_hire",
-        referenceId: hire.id,
-        note: `Admin released escrow for ${hire.packageTitle}`,
+      if (!lockedBrand || !lockedCreator || lockedBrand.held_balance < agreedPriceValue) {
+        throw new Error("insufficient-wallet-balance");
+      }
+
+      if (input.action === "force_release") {
+        await transactionDatabase.prepare("UPDATE deliverables SET status = ?, review_feedback = ?, reviewed_at = ?, approved_at = ? WHERE id = ?").run(["approved", note, actedAt, actedAt, latestDeliverable!.id]);
+        await transactionDatabase.prepare("UPDATE wallet_accounts SET held_balance = ?, updated_at = ? WHERE id = ?").run([lockedBrand.held_balance - agreedPriceValue, actedAt, brandWallet.id]);
+        await transactionDatabase.prepare("UPDATE wallet_accounts SET balance = ?, updated_at = ? WHERE id = ?").run([lockedCreator.balance + agreedPriceValue, actedAt, creatorWallet.id]);
+
+        await createWalletTransaction(transactionDatabase, {
+          walletId: brandWallet.id,
+          type: "escrow_release",
+          amount: agreedPriceValue,
+          currency: brandWallet.currency,
+          referenceType: "campaign_hire",
+          referenceId: hire.id,
+          note: `Admin released escrow for ${hire.packageTitle}`,
+          createdAt: actedAt,
+        });
+
+        await createWalletTransaction(transactionDatabase, {
+          walletId: creatorWallet.id,
+          type: "payout",
+          amount: agreedPriceValue,
+          currency: creatorWallet.currency,
+          referenceType: "campaign_hire",
+          referenceId: hire.id,
+          note: `Admin payout release for ${hire.packageTitle}`,
+          createdAt: actedAt,
+        });
+
+        await updateInstantHireState(transactionDatabase, {
+          hireId: hire.id,
+          status: "approved",
+          escrowStatus: "released-local",
+          updatedAt: actedAt,
+        });
+      } else {
+        await transactionDatabase.prepare("UPDATE wallet_accounts SET balance = ?, held_balance = ?, updated_at = ? WHERE id = ?").run([lockedBrand.balance + agreedPriceValue, lockedBrand.held_balance - agreedPriceValue, actedAt, brandWallet.id]);
+
+        await createWalletTransaction(transactionDatabase, {
+          walletId: brandWallet.id,
+          type: "refund",
+          amount: agreedPriceValue,
+          currency: brandWallet.currency,
+          referenceType: "campaign_hire",
+          referenceId: hire.id,
+          note: `Admin refunded escrow for ${hire.packageTitle}`,
+          createdAt: actedAt,
+        });
+
+        await updateInstantHireState(transactionDatabase, {
+          hireId: hire.id,
+          status: "cancelled",
+          escrowStatus: "refunded-local",
+          updatedAt: actedAt,
+        });
+      }
+
+      await appendConversationMessage(transactionDatabase, {
+        conversationId: hire.conversationId,
+        senderId: localSystemSenderId,
+        content: `Admin moderation action: ${input.action}. ${note}`,
         createdAt: actedAt,
       });
 
-      await createWalletTransaction(transactionDatabase, {
-        walletId: creatorWallet.id,
-        type: "payout",
-        amount: agreedPriceValue,
-        currency: creatorWallet.currency,
-        referenceType: "campaign_hire",
-        referenceId: hire.id,
-        note: `Admin payout release for ${hire.packageTitle}`,
-        createdAt: actedAt,
-      });
-
-      await updateInstantHireState(transactionDatabase, {
-        hireId: hire.id,
-        status: "approved",
-        escrowStatus: "released-local",
-        updatedAt: actedAt,
-      });
-    } else {
-      await transactionDatabase.prepare("UPDATE wallet_accounts SET balance = ?, held_balance = ?, updated_at = ? WHERE id = ?").run([brandWallet.balance + agreedPriceValue, brandWallet.held_balance - agreedPriceValue, actedAt, brandWallet.id]);
-
-      await createWalletTransaction(transactionDatabase, {
-        walletId: brandWallet.id,
-        type: "refund",
-        amount: agreedPriceValue,
-        currency: brandWallet.currency,
-        referenceType: "campaign_hire",
-        referenceId: hire.id,
-        note: `Admin refunded escrow for ${hire.packageTitle}`,
-        createdAt: actedAt,
-      });
-
-      await updateInstantHireState(transactionDatabase, {
-        hireId: hire.id,
-        status: "cancelled",
-        escrowStatus: "refunded-local",
-        updatedAt: actedAt,
-      });
-    }
-
-    await appendConversationMessage(transactionDatabase, {
-      conversationId: hire.conversationId,
-      senderId: localSystemSenderId,
-      content: `Admin moderation action: ${input.action}. ${note}`,
-      createdAt: actedAt,
-    });
-
-    await createNotification(transactionDatabase, {
-      userId: hire.brandUserId,
-      type: "admin_hire_action",
-      title: "Admin updated a hire",
-      body: note,
-      link: `/dashboard/hires/${hire.id}`,
-      createdAt: actedAt,
-    });
-
-    if (hire.creatorAuthUserId) {
       await createNotification(transactionDatabase, {
-        userId: hire.creatorAuthUserId,
+        userId: hire.brandUserId,
         type: "admin_hire_action",
         title: "Admin updated a hire",
         body: note,
-        link: `/creator/hires/${hire.id}`,
+        link: `/dashboard/hires/${hire.id}`,
         createdAt: actedAt,
       });
+
+      if (hire.creatorAuthUserId) {
+        await createNotification(transactionDatabase, {
+          userId: hire.creatorAuthUserId,
+          type: "admin_hire_action",
+          title: "Admin updated a hire",
+          body: note,
+          link: `/creator/hires/${hire.id}`,
+          createdAt: actedAt,
+        });
+      }
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "insufficient-wallet-balance") {
+      return { ok: false as const, error: "invalid-hire-state" as const };
     }
-  });
+
+    throw error;
+  }
 
   return { ok: true as const, hire: await getInstantHireRecordById(hire.id) };
 }
@@ -1184,7 +1285,7 @@ export async function approveDeliverableForHire(input: {
   }
 
   const approvedAt = new Date().toISOString();
-  const agreedPriceValue = parsePrice(hire.agreedPrice);
+  const agreedPriceValue = parsePriceToCents(hire.agreedPrice);
   const feedback = input.feedback?.trim();
 
   if (brandWallet.held_balance < agreedPriceValue) {
@@ -1193,87 +1294,101 @@ export async function approveDeliverableForHire(input: {
 
   const db = await ensureInstantHireTables();
 
-  await db.transaction(async (transactionDatabase) => {
-    await transactionDatabase.prepare("UPDATE deliverables SET status = ?, review_feedback = ?, reviewed_at = ?, approved_at = ? WHERE id = ?").run(["approved", feedback ?? deliverable.review_feedback, approvedAt, approvedAt, deliverable.id]);
+  try {
+    await db.transaction(async (transactionDatabase) => {
+      const lockedBrand = await getWalletRowForUpdate(transactionDatabase, brandWallet.id);
+      const lockedCreator = await getWalletRowForUpdate(transactionDatabase, creatorWallet.id);
 
-    await transactionDatabase.prepare(
-      `UPDATE wallet_accounts
-       SET held_balance = ?, updated_at = ?
-       WHERE id = ?`
-    ).run([brandWallet.held_balance - agreedPriceValue, approvedAt, brandWallet.id]);
+      if (!lockedBrand || !lockedCreator || lockedBrand.held_balance < agreedPriceValue) {
+        throw new Error("insufficient-wallet-balance");
+      }
 
-    await transactionDatabase.prepare(
-      `UPDATE wallet_accounts
-       SET balance = ?, updated_at = ?
-       WHERE id = ?`
-    ).run([creatorWallet.balance + agreedPriceValue, approvedAt, creatorWallet.id]);
+      await transactionDatabase.prepare("UPDATE deliverables SET status = ?, review_feedback = ?, reviewed_at = ?, approved_at = ? WHERE id = ?").run(["approved", feedback ?? deliverable.review_feedback, approvedAt, approvedAt, deliverable.id]);
 
-    await createWalletTransaction(transactionDatabase, {
-      walletId: brandWallet.id,
-      type: "escrow_release",
-      amount: agreedPriceValue,
-      currency: brandWallet.currency,
-      referenceType: "campaign_hire",
-      referenceId: hire.id,
-      note: `Escrow released for ${hire.packageTitle}`,
-      createdAt: approvedAt,
-    });
+      await transactionDatabase.prepare(
+        `UPDATE wallet_accounts
+         SET held_balance = ?, updated_at = ?
+         WHERE id = ?`
+      ).run([lockedBrand.held_balance - agreedPriceValue, approvedAt, brandWallet.id]);
 
-    await createWalletTransaction(transactionDatabase, {
-      walletId: creatorWallet.id,
-      type: "payout",
-      amount: agreedPriceValue,
-      currency: creatorWallet.currency,
-      referenceType: "campaign_hire",
-      referenceId: hire.id,
-      note: `Creator payout for ${hire.packageTitle}`,
-      createdAt: approvedAt,
-    });
+      await transactionDatabase.prepare(
+        `UPDATE wallet_accounts
+         SET balance = ?, updated_at = ?
+         WHERE id = ?`
+      ).run([lockedCreator.balance + agreedPriceValue, approvedAt, creatorWallet.id]);
 
-    await updateInstantHireState(transactionDatabase, {
-      hireId: hire.id,
-      status: "approved",
-      escrowStatus: "released-local",
-      updatedAt: approvedAt,
-    });
-
-    await appendConversationMessage(transactionDatabase, {
-      conversationId: hire.conversationId,
-      senderId: localSystemSenderId,
-      content: `Deliverable ${deliverable.revision_number} approved and escrow released to the creator wallet.`,
-      createdAt: approvedAt,
-    });
-
-    if (feedback) {
-      await appendConversationMessage(transactionDatabase, {
-        conversationId: hire.conversationId,
-        senderId: input.brandUserId,
-        content: feedback,
-        createdAt: new Date(Date.parse(approvedAt) + 1).toISOString(),
-      });
-    }
-
-    await createNotification(transactionDatabase, {
-      userId: hire.brandUserId,
-      type: "hire_approved",
-      title: "Escrow released",
-      body: `You approved ${hire.packageTitle} and released the held escrow.`,
-      link: `/dashboard/hires/${hire.id}`,
-      createdAt: approvedAt,
-    });
-
-    if (hire.creatorAuthUserId) {
-      await createNotification(transactionDatabase, {
-        userId: hire.creatorAuthUserId,
-        type: "hire_approved",
-        title: "Deliverable approved",
-        body: `Your work for ${hire.packageTitle} was approved and paid out.`,
-        link: `/creator/hires/${hire.id}`,
+      await createWalletTransaction(transactionDatabase, {
+        walletId: brandWallet.id,
+        type: "escrow_release",
+        amount: agreedPriceValue,
+        currency: brandWallet.currency,
+        referenceType: "campaign_hire",
+        referenceId: hire.id,
+        note: `Escrow released for ${hire.packageTitle}`,
         createdAt: approvedAt,
       });
+
+      await createWalletTransaction(transactionDatabase, {
+        walletId: creatorWallet.id,
+        type: "payout",
+        amount: agreedPriceValue,
+        currency: creatorWallet.currency,
+        referenceType: "campaign_hire",
+        referenceId: hire.id,
+        note: `Creator payout for ${hire.packageTitle}`,
+        createdAt: approvedAt,
+      });
+
+      await updateInstantHireState(transactionDatabase, {
+        hireId: hire.id,
+        status: "approved",
+        escrowStatus: "released-local",
+        updatedAt: approvedAt,
+      });
+
+      await appendConversationMessage(transactionDatabase, {
+        conversationId: hire.conversationId,
+        senderId: localSystemSenderId,
+        content: `Deliverable ${deliverable.revision_number} approved and escrow released to the creator wallet.`,
+        createdAt: approvedAt,
+      });
+
+      if (feedback) {
+        await appendConversationMessage(transactionDatabase, {
+          conversationId: hire.conversationId,
+          senderId: input.brandUserId,
+          content: feedback,
+          createdAt: new Date(Date.parse(approvedAt) + 1).toISOString(),
+        });
+      }
+
+      await createNotification(transactionDatabase, {
+        userId: hire.brandUserId,
+        type: "hire_approved",
+        title: "Escrow released",
+        body: `You approved ${hire.packageTitle} and released the held escrow.`,
+        link: `/dashboard/hires/${hire.id}`,
+        createdAt: approvedAt,
+      });
+
+      if (hire.creatorAuthUserId) {
+        await createNotification(transactionDatabase, {
+          userId: hire.creatorAuthUserId,
+          type: "hire_approved",
+          title: "Deliverable approved",
+          body: `Your work for ${hire.packageTitle} was approved and paid out.`,
+          link: `/creator/hires/${hire.id}`,
+          createdAt: approvedAt,
+        });
+      }
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "insufficient-wallet-balance") {
+      return { ok: false as const, error: "invalid-hire-state" as const };
     }
 
-  });
+    throw error;
+  }
 
   const nextDeliverable = await getDeliverableRowById(deliverable.id);
   return { ok: true as const, hire: await getInstantHireRecordById(hire.id), deliverable: nextDeliverable ? toDeliverableRecord(nextDeliverable) : undefined };
@@ -1311,7 +1426,7 @@ export async function refundInstantHire(input: {
   }
 
   const refundAt = new Date().toISOString();
-  const agreedPriceValue = parsePrice(hire.agreedPrice);
+  const agreedPriceValue = parsePriceToCents(hire.agreedPrice);
 
   if (brandWallet.held_balance < agreedPriceValue) {
     return { ok: false as const, error: "invalid-hire-state" as const };
@@ -1319,66 +1434,79 @@ export async function refundInstantHire(input: {
 
   const db = await ensureInstantHireTables();
 
-  await db.transaction(async (transactionDatabase) => {
-    await transactionDatabase.prepare(
-      `UPDATE wallet_accounts
-       SET balance = ?, held_balance = ?, updated_at = ?
-       WHERE id = ?`
-    ).run([brandWallet.balance + agreedPriceValue, brandWallet.held_balance - agreedPriceValue, refundAt, brandWallet.id]);
+  try {
+    await db.transaction(async (transactionDatabase) => {
+      const lockedBrand = await getWalletRowForUpdate(transactionDatabase, brandWallet.id);
 
-    await createWalletTransaction(transactionDatabase, {
-      walletId: brandWallet.id,
-      type: "refund",
-      amount: agreedPriceValue,
-      currency: brandWallet.currency,
-      referenceType: "campaign_hire",
-      referenceId: hire.id,
-      note: `Escrow refunded for ${hire.packageTitle}`,
-      createdAt: refundAt,
-    });
+      if (!lockedBrand || lockedBrand.held_balance < agreedPriceValue) {
+        throw new Error("insufficient-wallet-balance");
+      }
 
-    await updateInstantHireState(transactionDatabase, {
-      hireId: hire.id,
-      status: "cancelled",
-      escrowStatus: "refunded-local",
-      updatedAt: refundAt,
-    });
+      await transactionDatabase.prepare(
+        `UPDATE wallet_accounts
+         SET balance = ?, held_balance = ?, updated_at = ?
+         WHERE id = ?`
+      ).run([lockedBrand.balance + agreedPriceValue, lockedBrand.held_balance - agreedPriceValue, refundAt, brandWallet.id]);
 
-    await appendConversationMessage(transactionDatabase, {
-      conversationId: hire.conversationId,
-      senderId: localSystemSenderId,
-      content: `Hire cancelled and escrow refunded to the brand wallet for ${hire.packageTitle}.`,
-      createdAt: refundAt,
-    });
-
-    await appendConversationMessage(transactionDatabase, {
-      conversationId: hire.conversationId,
-      senderId: input.brandUserId,
-      content: reason,
-      createdAt: new Date(Date.parse(refundAt) + 1).toISOString(),
-    });
-
-    await createNotification(transactionDatabase, {
-      userId: hire.brandUserId,
-      type: "hire_refunded",
-      title: "Hire refunded",
-      body: reason,
-      link: `/dashboard/hires/${hire.id}`,
-      createdAt: refundAt,
-    });
-
-    if (hire.creatorAuthUserId) {
-      await createNotification(transactionDatabase, {
-        userId: hire.creatorAuthUserId,
-        type: "hire_refunded",
-        title: "Hire cancelled",
-        body: reason,
-        link: `/creator/hires/${hire.id}`,
+      await createWalletTransaction(transactionDatabase, {
+        walletId: brandWallet.id,
+        type: "refund",
+        amount: agreedPriceValue,
+        currency: brandWallet.currency,
+        referenceType: "campaign_hire",
+        referenceId: hire.id,
+        note: `Escrow refunded for ${hire.packageTitle}`,
         createdAt: refundAt,
       });
+
+      await updateInstantHireState(transactionDatabase, {
+        hireId: hire.id,
+        status: "cancelled",
+        escrowStatus: "refunded-local",
+        updatedAt: refundAt,
+      });
+
+      await appendConversationMessage(transactionDatabase, {
+        conversationId: hire.conversationId,
+        senderId: localSystemSenderId,
+        content: `Hire cancelled and escrow refunded to the brand wallet for ${hire.packageTitle}.`,
+        createdAt: refundAt,
+      });
+
+      await appendConversationMessage(transactionDatabase, {
+        conversationId: hire.conversationId,
+        senderId: input.brandUserId,
+        content: reason,
+        createdAt: new Date(Date.parse(refundAt) + 1).toISOString(),
+      });
+
+      await createNotification(transactionDatabase, {
+        userId: hire.brandUserId,
+        type: "hire_refunded",
+        title: "Hire refunded",
+        body: reason,
+        link: `/dashboard/hires/${hire.id}`,
+        createdAt: refundAt,
+      });
+
+      if (hire.creatorAuthUserId) {
+        await createNotification(transactionDatabase, {
+          userId: hire.creatorAuthUserId,
+          type: "hire_refunded",
+          title: "Hire cancelled",
+          body: reason,
+          link: `/creator/hires/${hire.id}`,
+          createdAt: refundAt,
+        });
+      }
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "insufficient-wallet-balance") {
+      return { ok: false as const, error: "invalid-hire-state" as const };
     }
 
-  });
+    throw error;
+  }
 
   return { ok: true as const, hire: await getInstantHireRecordById(hire.id) };
 }
@@ -1395,7 +1523,7 @@ export async function createInstantHireRecord(input: {
     return { ok: false as const, error: "package-not-found" as const };
   }
 
-  const agreedPriceValue = parsePrice(packageSelection.package.price);
+  const agreedPriceValue = parsePriceToCents(packageSelection.package.price);
 
   if (!Number.isFinite(agreedPriceValue) || agreedPriceValue <= 0) {
     return { ok: false as const, error: "package-not-found" as const };
@@ -1591,7 +1719,7 @@ export async function createCampaignApplicationHireRecord(input: {
   proposedPrice: string;
   deliveryDeadline: string;
 }): Promise<{ ok: true; hire: InstantHireRecord } | { ok: false; error: string }> {
-  const agreedPriceValue = parsePrice(input.proposedPrice);
+  const agreedPriceValue = parsePriceToCents(input.proposedPrice);
 
   if (!Number.isFinite(agreedPriceValue) || agreedPriceValue <= 0) {
     return { ok: false as const, error: "invalid-price" };

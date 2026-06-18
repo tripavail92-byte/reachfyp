@@ -285,45 +285,6 @@ export async function syncLinkedInPlatformAccount(): Promise<SocialSyncResult> {
 }
 
 // ---------------------------------------------------------------------------
-// Dispatcher — routes to the correct adapter by platform name
-// ---------------------------------------------------------------------------
-export type PlatformSyncConfig = {
-  youtubeApiKey?: string;
-  xBearerToken?: string;
-  instagramAccessToken?: string;
-  tiktokAccessToken?: string;
-};
-
-export async function dispatchPlatformSync(
-  platform: string,
-  config: PlatformSyncConfig,
-): Promise<SocialSyncResult> {
-  const normalized = platform.toLowerCase();
-
-  switch (normalized) {
-    case "youtube": {
-      if (!config.youtubeApiKey) return { ok: false, error: "youtube-api-key-missing" };
-      return syncYouTubePlatformAccount("", config.youtubeApiKey); // handle passed separately
-    }
-    case "x":
-    case "twitter": {
-      if (!config.xBearerToken) return { ok: false, error: "x-bearer-token-missing" };
-      return syncXPlatformAccount("", config.xBearerToken); // handle passed separately
-    }
-    case "instagram": {
-      if (!config.instagramAccessToken) return { ok: false, error: "instagram-token-missing" };
-      return syncInstagramPlatformAccount(config.instagramAccessToken);
-    }
-    case "tiktok": {
-      if (!config.tiktokAccessToken) return { ok: false, error: "tiktok-token-missing" };
-      return syncTikTokPlatformAccount(config.tiktokAccessToken);
-    }
-    default:
-      return { ok: false, error: "platform-not-supported" };
-  }
-}
-
-// ---------------------------------------------------------------------------
 // OAuth URL builders
 // ---------------------------------------------------------------------------
 export function buildInstagramOAuthUrl(appId: string, redirectUri: string, state: string): string {

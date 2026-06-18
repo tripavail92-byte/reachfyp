@@ -61,7 +61,7 @@ export default async function CreateCampaignPage({ searchParams }: CreateCampaig
                 <h2 className="product-card__title">Campaign brief</h2>
               </div>
             </div>
-            <form action="/dashboard/campaigns/create" className="auth-form" method="post">
+            <form action="/dashboard/campaigns/create/submit" className="auth-form" method="post">
               <label className="auth-field">
                 <span className="auth-field__label">Campaign title</span>
                 <input className="auth-input" name="title" placeholder="Spring beauty launch" required type="text" />

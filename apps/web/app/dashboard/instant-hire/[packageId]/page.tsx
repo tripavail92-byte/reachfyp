@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getCreatorPackageByCheckoutId, getWalletAccountByUserId } from "@reachfyp/api";
+import { formatCents, getCreatorPackageByCheckoutId, getWalletAccountByUserId } from "@reachfyp/api";
 import { GlassPanel } from "@reachfyp/ui";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentSessionUser } from "../../../../lib/auth/session";
@@ -151,11 +151,11 @@ export default async function InstantHireCheckoutPage({ params, searchParams }: 
                 <div className="profile-list-grid">
                   <div className="profile-list-card">
                     <h3 className="panel-card-title">Available balance</h3>
-                    <p className="profile-list-card__copy">${brandWallet.balance.toFixed(2)}</p>
+                    <p className="profile-list-card__copy">${formatCents(brandWallet.balance)}</p>
                   </div>
                   <div className="profile-list-card">
                     <h3 className="panel-card-title">Held balance</h3>
-                    <p className="profile-list-card__copy">${brandWallet.heldBalance.toFixed(2)}</p>
+                    <p className="profile-list-card__copy">${formatCents(brandWallet.heldBalance)}</p>
                   </div>
                   <div className="profile-list-card">
                     <h3 className="panel-card-title">Checkout amount</h3>

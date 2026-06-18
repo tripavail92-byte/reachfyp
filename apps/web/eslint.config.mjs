@@ -12,7 +12,8 @@ const compat = new FlatCompat({
 const config = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
-    ignores: [".next/**", "next-env.d.ts"],
+    // Generated build output uses custom dist dirs (see next.config.ts); never lint it.
+    ignores: [".next/**", ".next-build/**", ".next-dev/**", "next-env.d.ts"],
   },
 ];
 

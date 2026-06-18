@@ -1,6 +1,6 @@
 import { createCampaign } from "@reachfyp/api";
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentSessionUser } from "../../../../lib/auth/session";
+import { getCurrentSessionUser } from "../../../../../lib/auth/session";
 
 export async function POST(request: NextRequest) {
   const currentUser = await getCurrentSessionUser();

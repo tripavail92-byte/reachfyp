@@ -110,11 +110,12 @@ const reachfypTableStatements = [
     read_at TEXT,
     created_at TEXT NOT NULL
   )`,
+  // Monetary columns hold integer cents (see packages/api/src/money.ts).
   `CREATE TABLE IF NOT EXISTS wallet_accounts (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL UNIQUE,
-    balance REAL NOT NULL,
-    held_balance REAL NOT NULL,
+    balance BIGINT NOT NULL,
+    held_balance BIGINT NOT NULL,
     currency TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
@@ -122,7 +123,7 @@ const reachfypTableStatements = [
     id TEXT PRIMARY KEY,
     wallet_id TEXT NOT NULL,
     type TEXT NOT NULL,
-    amount REAL NOT NULL,
+    amount BIGINT NOT NULL,
     currency TEXT NOT NULL,
     reference_type TEXT NOT NULL,
     reference_id TEXT NOT NULL,
@@ -143,7 +144,7 @@ const reachfypTableStatements = [
     id TEXT PRIMARY KEY,
     creator_user_id TEXT NOT NULL,
     wallet_id TEXT NOT NULL,
-    amount REAL NOT NULL,
+    amount BIGINT NOT NULL,
     currency TEXT NOT NULL,
     status TEXT NOT NULL,
     note TEXT NOT NULL,
@@ -193,6 +194,11 @@ const reachfypTableStatements = [
     status TEXT NOT NULL,
     applied_at TEXT NOT NULL,
     reviewed_at TEXT
+  )`,
+  // Key/value store for one-time data migrations and schema markers.
+  `CREATE TABLE IF NOT EXISTS reachfyp_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
   )`,
 ] as const;
 

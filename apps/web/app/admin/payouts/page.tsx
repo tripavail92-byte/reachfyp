@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { listAllPayoutRequests, listAuthUsersByRole } from "@reachfyp/api";
+import { formatCents, listAllPayoutRequests, listAuthUsersByRole } from "@reachfyp/api";
 import { GlassPanel } from "@reachfyp/ui";
 import { redirect } from "next/navigation";
 import { getCurrentSessionUser } from "../../../lib/auth/session";
@@ -75,7 +75,7 @@ export default async function AdminPayoutsPage({ searchParams }: AdminPayoutsPag
           </GlassPanel>
           <GlassPanel className="profile-score-card">
             <span className="metric-pill__label">Pending amount</span>
-            <strong className="profile-score-card__value profile-score-card__value--small">${pendingAmount.toFixed(2)}</strong>
+            <strong className="profile-score-card__value profile-score-card__value--small">${formatCents(pendingAmount)}</strong>
             <p className="profile-score-card__copy">The amount currently reserved in the payout review queue.</p>
           </GlassPanel>
           <GlassPanel className="profile-score-card">
@@ -96,7 +96,7 @@ export default async function AdminPayoutsPage({ searchParams }: AdminPayoutsPag
             <div className="profile-list-grid">
               {pendingRequests.length > 0 ? pendingRequests.map((request) => (
                 <div key={request.id} className="profile-list-card">
-                  <h3 className="panel-card-title">${request.amount.toFixed(2)} · {request.status}</h3>
+                  <h3 className="panel-card-title">${formatCents(request.amount)} · {request.status}</h3>
                   <p className="profile-list-card__copy">Creator: {creatorNameById.get(request.creatorUserId) ?? request.creatorUserId}</p>
                   <p className="profile-list-card__copy">{request.note}</p>
                   <div className="auth-layout" aria-label="Payout review actions">
@@ -141,7 +141,7 @@ export default async function AdminPayoutsPage({ searchParams }: AdminPayoutsPag
             <div className="profile-list-grid">
               {reviewedRequests.length > 0 ? reviewedRequests.map((request) => (
                 <div key={request.id} className="profile-list-card">
-                  <h3 className="panel-card-title">${request.amount.toFixed(2)} · {request.status}</h3>
+                  <h3 className="panel-card-title">${formatCents(request.amount)} · {request.status}</h3>
                   <p className="profile-list-card__copy">Creator: {creatorNameById.get(request.creatorUserId) ?? request.creatorUserId}</p>
                   <p className="profile-list-card__copy">{request.note}</p>
                   {request.adminNote ? <p className="profile-list-card__copy">Admin note: {request.adminNote}</p> : null}

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getCreatorRecordByAuthUserId, getInstantHireDetailById } from "@reachfyp/api";
+import { formatCents, getCreatorRecordByAuthUserId, getInstantHireDetailById } from "@reachfyp/api";
 import { GlassPanel } from "@reachfyp/ui";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentSessionUser } from "../../../../lib/auth/session";
@@ -113,7 +113,7 @@ export default async function CreatorHireDetailPage({ params, searchParams }: Cr
           </GlassPanel>
           <GlassPanel className="profile-score-card">
             <span className="metric-pill__label">Creator wallet</span>
-            <strong className="profile-score-card__value profile-score-card__value--small">${hireDetail.creatorWallet.balance.toFixed(2)}</strong>
+            <strong className="profile-score-card__value profile-score-card__value--small">${formatCents(hireDetail.creatorWallet.balance)}</strong>
             <p className="profile-score-card__copy">Your wallet balance increases only after the brand approves and the held escrow is released.</p>
           </GlassPanel>
           <GlassPanel className="profile-score-card">

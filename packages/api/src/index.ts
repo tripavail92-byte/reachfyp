@@ -110,6 +110,11 @@ export {
   buildScoringSignalsFromData,
 } from "./scoring-engine";
 
+export {
+  formatCents,
+  parsePriceToCents,
+} from "./money";
+
 export type {
   CreatorPackage,
   CreatorPackageSelection,

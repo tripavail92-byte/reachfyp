@@ -56,6 +56,19 @@ For every feature change, update this file before closing the work:
 
 ## Weekly Execution Board
 
+### Week of 2026-06-19
+
+Completed this week (review + hardening pass):
+- [x] fixed a build-breaking Next.js App Router collision: `/dashboard/campaigns/create` had both `page.tsx` and `route.ts`; the POST handler moved to `/dashboard/campaigns/create/submit` and the form action was repointed
+- [x] converted all monetary values (wallet balances, escrow, ledger transactions, payout requests) to integer cents via a shared `@reachfyp/api` money module (`parsePriceToCents`/`formatCents`); display sites format with `formatCents`
+- [x] added a one-time idempotent dollars→cents data migration guarded by a `reachfyp_meta` marker so existing local databases convert cleanly and fresh databases no-op
+- [x] hardened wallet money mutations against concurrent writes: wallet rows are now read inside the owning transaction with `FOR UPDATE` (Postgres) and re-validated; fixed a cross-connection wallet read in `ensureWalletAccount`
+- [x] wired the custom Next dist dirs (`.next-build`/`.next-dev`) into Turbo `outputs` and the ESLint ignore list so caching works and lint stops scanning build artifacts
+- [x] removed dead `dispatchPlatformSync` (passed empty handles for YouTube/X) and its unused config type
+
+Known follow-up:
+- [ ] replace the ad-hoc runtime `ALTER TABLE ADD COLUMN` schema patching with a real migration runner as part of the queued Postgres cutover
+
 ### Week of 2026-04-24
 
 Completed this week:
@@ -261,6 +274,10 @@ Next queued work after the current slice:
 
 ### Latest confirmed checks
 
+- [x] 2026-06-19: `pnpm typecheck` passed (5/5)
+- [x] 2026-06-19: `pnpm lint` passed (0 errors) after adding `.next-build`/`.next-dev` to the ESLint ignore list
+- [x] 2026-06-19: `pnpm build` passed (5/5) after fixing the `/dashboard/campaigns/create` page/route collision; the Turbo "no output files" warning is gone after pointing `@reachfyp/web#build` outputs at `.next-build`
+- [x] 2026-06-19: standalone `node:sqlite` check confirmed the dollars→cents migration multiplies existing values, is idempotent, no-ops on a fresh DB, and that integer-cents arithmetic keeps `0.1 + 0.2` exact
 - [x] 2026-04-23: `cmd /c "cd /d D:\marketingsales && pnpm build"`
 - [x] 2026-04-23: `cmd /c "cd /d D:\marketingsales && pnpm lint"`
 - [x] 2026-04-23: `cmd /c "cd /d D:\marketingsales && pnpm typecheck"`

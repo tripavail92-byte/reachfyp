@@ -1,4 +1,4 @@
-import { getWalletAccountByUserId, listPayoutRequestsForCreator } from "@reachfyp/api";
+import { formatCents, getWalletAccountByUserId, listPayoutRequestsForCreator } from "@reachfyp/api";
 import Link from "next/link";
 import { GlassPanel } from "@reachfyp/ui";
 import { redirect } from "next/navigation";
@@ -73,17 +73,17 @@ export default async function CreatorPayoutsPage({ searchParams }: CreatorPayout
         <section className="profile-score-grid" aria-label="Creator payout summary">
           <GlassPanel className="profile-score-card">
             <span className="metric-pill__label">Wallet balance</span>
-            <strong className="profile-score-card__value profile-score-card__value--small">{wallet ? `$${wallet.balance.toFixed(2)}` : "$0.00"}</strong>
+            <strong className="profile-score-card__value profile-score-card__value--small">{wallet ? `$${formatCents(wallet.balance)}` : "$0.00"}</strong>
             <p className="profile-score-card__copy">Released hire payouts land here before a creator requests cash-out.</p>
           </GlassPanel>
           <GlassPanel className="profile-score-card">
             <span className="metric-pill__label">Pending requests</span>
-            <strong className="profile-score-card__value profile-score-card__value--small">${pendingAmount.toFixed(2)}</strong>
+            <strong className="profile-score-card__value profile-score-card__value--small">${formatCents(pendingAmount)}</strong>
             <p className="profile-score-card__copy">Pending requests reduce what can be requested again until admin review completes.</p>
           </GlassPanel>
           <GlassPanel className="profile-score-card">
             <span className="metric-pill__label">Available now</span>
-            <strong className="profile-score-card__value profile-score-card__value--small">${availableToRequest.toFixed(2)}</strong>
+            <strong className="profile-score-card__value profile-score-card__value--small">${formatCents(availableToRequest)}</strong>
             <p className="profile-score-card__copy">This is the remaining amount a creator can request after pending payouts are reserved.</p>
           </GlassPanel>
           <GlassPanel className="profile-score-card">
@@ -128,7 +128,7 @@ export default async function CreatorPayoutsPage({ searchParams }: CreatorPayout
             <div className="profile-list-grid">
               {pendingRequests.length > 0 ? pendingRequests.map((request) => (
                 <div key={request.id} className="profile-list-card">
-                  <h3 className="panel-card-title">${request.amount.toFixed(2)} · {request.status}</h3>
+                  <h3 className="panel-card-title">${formatCents(request.amount)} · {request.status}</h3>
                   <p className="profile-list-card__copy">{request.note}</p>
                   {request.adminNote ? <p className="profile-list-card__copy">Admin note: {request.adminNote}</p> : null}
                 </div>
@@ -151,7 +151,7 @@ export default async function CreatorPayoutsPage({ searchParams }: CreatorPayout
             <div className="profile-list-grid">
               {reviewedRequests.length > 0 ? reviewedRequests.map((request) => (
                 <div key={request.id} className="profile-list-card">
-                  <h3 className="panel-card-title">${request.amount.toFixed(2)} · {request.status}</h3>
+                  <h3 className="panel-card-title">${formatCents(request.amount)} · {request.status}</h3>
                   <p className="profile-list-card__copy">{request.note}</p>
                   {request.adminNote ? <p className="profile-list-card__copy">Admin note: {request.adminNote}</p> : null}
                 </div>

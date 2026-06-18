@@ -7,7 +7,7 @@
     },
     "@reachfyp/web#build": {
       "dependsOn": ["^build"],
-      "outputs": [".next/**"]
+      "outputs": [".next-build/**"]
     },
     "dev": {
       "cache": false,
