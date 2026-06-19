@@ -8,6 +8,7 @@ export type CreatorMarketplaceFilterKey =
 export type CreatorMarketplaceSort = "ranking" | "authenticity" | "rating" | "price-low";
 
 export type CreatorMarketplaceQuery = {
+  q?: string;
   filters: CreatorMarketplaceFilterKey[];
   sort: CreatorMarketplaceSort;
   page: number;
@@ -67,6 +68,10 @@ export const creatorMarketplaceSortOptions: Array<{
 
 export function createCreatorMarketplaceQueryString(query: CreatorMarketplaceQuery) {
   const searchParams = new URLSearchParams();
+
+  if (query.q && query.q.trim()) {
+    searchParams.set("q", query.q.trim());
+  }
 
   if (query.filters.length > 0) {
     searchParams.set("filters", query.filters.join(","));

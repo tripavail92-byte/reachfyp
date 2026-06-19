@@ -333,7 +333,26 @@ export async function getCreatorMarketplaceResponse(query: CreatorMarketplaceQue
     };
   }
 
-  const filteredCreators = (await getCreatorRecords()).filter((creator) => query.filters.every((filter) => matchesMarketplaceFilter(creator, filter)));
+  const searchTerm = query.q?.trim().toLowerCase() ?? "";
+  const filteredCreators = (await getCreatorRecords())
+    .filter((creator) => query.filters.every((filter) => matchesMarketplaceFilter(creator, filter)))
+    .filter((creator) => {
+      if (!searchTerm) {
+        return true;
+      }
+
+      const haystack = [
+        creator.name,
+        creator.username,
+        creator.location,
+        creator.summary,
+        creator.niche.join(" "),
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(searchTerm);
+    });
   const allItems = sortMarketplaceItems(filteredCreators.map(toMarketplaceItem), query.sort);
   const startIndex = (query.page - 1) * query.pageSize;
   const endIndex = startIndex + query.pageSize;

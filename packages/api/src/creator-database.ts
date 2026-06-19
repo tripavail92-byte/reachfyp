@@ -75,7 +75,9 @@ const defaultCreatorMetrics = {
   audienceQuality: 71,
   growthSignal: "Creator profile just published",
   deliveryQuality: "Creator setup in progress",
-  rating: 4.8,
+  // New creators start unrated (0). Ratings should come from completed-hire
+  // reviews — never fabricate a score before any work has happened.
+  rating: 0,
 } as const;
 
 let database: ReachfypDatabase | null = null;
@@ -726,7 +728,7 @@ export async function syncStoredCreatorSocialAccountForAuthUser(seedRecords: Cre
     // Metadata-only update when API not available
     return {
       ...account,
-      syncStatus: syncResult ? `API unavailable: ${syncError}` : "Sync marker updated",
+      syncStatus: syncResult ? `API unavailable: ${syncError}` : "Manual entry — connect via OAuth to sync live audience data",
       lastSyncedAt: syncedAt,
     };
   }));

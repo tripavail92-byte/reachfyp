@@ -44,10 +44,11 @@ function parsePreviewState(rawValue: string | null) {
 }
 
 export async function GET(request: NextRequest) {
+  const q = (request.nextUrl.searchParams.get("q") ?? "").slice(0, 100);
   const filters = parseFilters(request.nextUrl.searchParams.get("filters"));
   const sort = parseSort(request.nextUrl.searchParams.get("sort"));
   const page = parsePositiveInteger(request.nextUrl.searchParams.get("page"), 1);
-  const pageSize = parsePositiveInteger(request.nextUrl.searchParams.get("pageSize"), 2);
+  const pageSize = parsePositiveInteger(request.nextUrl.searchParams.get("pageSize"), 12);
   const previewState = parsePreviewState(request.nextUrl.searchParams.get("previewState"));
 
   if (previewState === "error") {
@@ -55,6 +56,7 @@ export async function GET(request: NextRequest) {
   }
 
   const response = await getCreatorMarketplaceResponse({
+    q,
     filters,
     sort,
     page,

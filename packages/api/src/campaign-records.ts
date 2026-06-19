@@ -377,8 +377,14 @@ export async function reviewCampaignApplication(
   });
 
   if (!hireResult.ok) {
-    // Application status is already updated — log the hire failure but don't roll back
-    return { ok: true, hireId: undefined };
+    // Hire/escrow couldn't be created (e.g. insufficient wallet balance).
+    // Roll the application back to pending and surface the error instead of
+    // leaving it "accepted" with no hire — the brand can retry after funding.
+    await db.prepare(
+      "UPDATE campaign_applications SET status = ?, reviewed_at = ? WHERE id = ?"
+    ).run(["pending", null, applicationId]);
+
+    return { ok: false, error: hireResult.error };
   }
 
   return { ok: true, hireId: hireResult.hire.id };

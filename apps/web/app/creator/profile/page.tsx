@@ -82,6 +82,13 @@ export default async function CreatorProfileEditorPage({ searchParams }: Creator
             This is the first real creator-side write flow. It lets a signed-in creator create, update, or remove one public profile while keeping the existing marketplace and public profile routes intact.
           </p>
           {feedbackMessage ? <span className="badge badge--accent">{feedbackMessage}</span> : null}
+          {currentUser.role === "creator" ? (
+            <div className="auth-actions">
+              <Link className="chip chip--solid" href="/creator/onboarding">
+                {creatorProfile ? "Re-run guided setup" : "Use guided setup"}
+              </Link>
+            </div>
+          ) : null}
         </GlassPanel>
 
         {currentUser.role !== "creator" ? (
@@ -336,6 +343,15 @@ export default async function CreatorProfileEditorPage({ searchParams }: Creator
                       </div>
                       <span className="badge">One account per platform</span>
                     </div>
+                    <div className="auth-actions">
+                      <Link className="chip chip--solid" href="/creator/socials/oauth-start?platform=instagram">
+                        Connect Instagram (live sync)
+                      </Link>
+                      <Link className="chip chip--solid" href="/creator/socials/oauth-start?platform=tiktok">
+                        Connect TikTok (live sync)
+                      </Link>
+                    </div>
+                    <p className="auth-hint">Connect via OAuth for verified, auto-synced audience data — or add a platform manually below.</p>
                     <form action="/creator/socials/connect" className="auth-form" method="post">
                       <label className="auth-field">
                         <span className="auth-field__label">Platform</span>

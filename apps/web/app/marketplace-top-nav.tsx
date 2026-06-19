@@ -27,6 +27,7 @@ export async function MarketplaceTopNav({ activeHref }: MarketplaceTopNavProps) 
       ]
     : currentUser?.role === "brand"
       ? [
+          { href: "/dashboard/campaigns", label: "My Campaigns" },
           { href: "/dashboard/hires", label: "Brand Hires" },
           { href: "/dashboard/notifications", label: "Notifications" },
         ]

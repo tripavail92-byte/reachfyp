@@ -173,12 +173,19 @@ export default async function CreatorProfilePage({ params }: CreatorProfilePageP
                 </div>
               </div>
               <div className="profile-list-grid">
-                {creator.portfolio.map((item) => (
-                  <div key={item.title} className="profile-list-card">
-                    <h3 className="panel-card-title">{item.title}</h3>
-                    <p className="profile-list-card__copy">{item.result}</p>
+                {creator.portfolio.length > 0 ? (
+                  creator.portfolio.map((item) => (
+                    <div key={item.title} className="profile-list-card">
+                      <h3 className="panel-card-title">{item.title}</h3>
+                      <p className="profile-list-card__copy">{item.result}</p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="profile-list-card">
+                    <h3 className="panel-card-title">No portfolio work yet</h3>
+                    <p className="profile-list-card__copy">This creator hasn&apos;t added portfolio highlights yet. Their work will appear here as campaigns complete.</p>
                   </div>
-                ))}
+                )}
               </div>
             </GlassPanel>
 
@@ -188,15 +195,22 @@ export default async function CreatorProfilePage({ params }: CreatorProfilePageP
                   <h2 className="results-toolbar__title">Reviews</h2>
                   <p className="results-toolbar__subtitle">Qualitative trust proof to support fast creator selection.</p>
                 </div>
-                <span className="sort-badge">Rating {creator.rating}</span>
+                <span className="sort-badge">{creator.rating > 0 ? `Rating ${creator.rating}` : "New creator"}</span>
               </div>
               <div className="profile-list-grid">
-                {creator.reviews.map((review) => (
-                  <div key={review.source} className="profile-list-card">
-                    <h3 className="panel-card-title">{review.source}</h3>
-                    <p className="profile-list-card__copy">{review.quote}</p>
+                {creator.reviews.length > 0 ? (
+                  creator.reviews.map((review) => (
+                    <div key={review.source} className="profile-list-card">
+                      <h3 className="panel-card-title">{review.source}</h3>
+                      <p className="profile-list-card__copy">{review.quote}</p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="profile-list-card">
+                    <h3 className="panel-card-title">No reviews yet</h3>
+                    <p className="profile-list-card__copy">This creator is new to reachfyp. Reviews appear here once a brand completes a hire with them.</p>
                   </div>
-                ))}
+                )}
               </div>
             </GlassPanel>
 

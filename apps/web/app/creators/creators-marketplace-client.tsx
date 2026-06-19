@@ -33,7 +33,7 @@ type CreatorsLoadState =
       data: CreatorMarketplaceResponse;
     };
 
-const PAGE_SIZE = 2;
+const PAGE_SIZE = 12;
 
 function sortFilters(filters: CreatorMarketplaceFilterKey[]) {
   const order = creatorMarketplaceFilterOptions.map((option) => option.key);
@@ -44,10 +44,18 @@ function sortFilters(filters: CreatorMarketplaceFilterKey[]) {
 export function CreatorsMarketplaceClient({ totalCreators, previewState }: CreatorsMarketplaceClientProps) {
   const [activeFilters, setActiveFilters] = useState<CreatorMarketplaceFilterKey[]>([]);
   const [sort, setSort] = useState<CreatorMarketplaceSort>("ranking");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [loadState, setLoadState] = useState<CreatorsLoadState>({ status: "loading" });
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+
+  // Debounce the search box so we don't refetch on every keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(searchInput.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -58,6 +66,7 @@ export function CreatorsMarketplaceClient({ totalCreators, previewState }: Creat
 
       try {
         const queryString = createCreatorMarketplaceQueryString({
+          q: search,
           filters: activeFilters,
           sort,
           page: 1,
@@ -94,7 +103,7 @@ export function CreatorsMarketplaceClient({ totalCreators, previewState }: Creat
     return () => {
       abortController.abort();
     };
-  }, [activeFilters, previewState, reloadKey, sort]);
+  }, [activeFilters, previewState, reloadKey, search, sort]);
 
   async function loadMore() {
     if (loadState.status !== "success" || !loadState.data.hasMore || loadState.data.nextPage === null) {
@@ -106,6 +115,7 @@ export function CreatorsMarketplaceClient({ totalCreators, previewState }: Creat
 
     try {
       const queryString = createCreatorMarketplaceQueryString({
+        q: search,
         filters: activeFilters,
         sort,
         page: loadState.data.nextPage,
@@ -150,6 +160,8 @@ export function CreatorsMarketplaceClient({ totalCreators, previewState }: Creat
   function resetFilters() {
     setActiveFilters([]);
     setSort("ranking");
+    setSearchInput("");
+    setSearch("");
     setReloadKey((current) => current + 1);
   }
 
@@ -178,6 +190,16 @@ export function CreatorsMarketplaceClient({ totalCreators, previewState }: Creat
               </button>
             ))}
           </div>
+        </div>
+        <div className="marketplace-search">
+          <input
+            className="auth-input marketplace-search__input"
+            type="search"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            placeholder="Search creators by name, niche, or location"
+            aria-label="Search creators"
+          />
         </div>
         <div className="filter-row">
           <button
@@ -272,7 +294,7 @@ export function CreatorsMarketplaceClient({ totalCreators, previewState }: Creat
                   </div>
                   <div className="creator-card__media-bottom">
                     <span className="media-badge media-badge--ghost">{creator.niche[0]}</span>
-                    <span className="media-badge media-badge--ghost">{creator.rating} star</span>
+                    <span className="media-badge media-badge--ghost">{creator.rating > 0 ? `${creator.rating} star` : "New"}</span>
                   </div>
                 </InteractiveImageFrame>
                 <div className="creator-card__name-row">
